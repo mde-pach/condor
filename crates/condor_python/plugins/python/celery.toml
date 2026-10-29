@@ -1,0 +1,7 @@
+[plugin]
+name = "celery"
+description = "Tasks are run by workers, often scheduled by name."
+when_imported = ["celery"]
+
+[[used]]
+decorated_by = ["celery.shared_task", "*.task"]

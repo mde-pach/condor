@@ -1,0 +1,11 @@
+[plugin]
+name = "attrs"
+description = "attrs classes: annotated attributes and attr.ib() assignments are fields."
+when_imported = ["attr", "attrs"]
+
+[[fields_used]]
+decorated_by = [
+    "attr.s", "attr.attrs", "attr.define", "attr.frozen", "attr.mutable", "attr.dataclass",
+    "attrs.define", "attrs.frozen", "attrs.mutable",
+]
+fields = "all"

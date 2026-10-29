@@ -1,0 +1,8 @@
+[plugin]
+name = "enum"
+description = "Enum members are reached by iteration, value lookup and name lookup, not only by attribute access."
+when_imported = ["enum"]
+
+[[fields_used]]
+inherits = ["enum.Enum", "enum.IntEnum", "enum.StrEnum", "enum.Flag", "enum.IntFlag", "enum.ReprEnum"]
+fields = "assigned"

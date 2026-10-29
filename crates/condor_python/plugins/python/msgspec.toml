@@ -1,0 +1,8 @@
+[plugin]
+name = "msgspec"
+description = "Struct fields are set by decoding and read by encoding."
+when_imported = ["msgspec"]
+
+[[fields_used]]
+inherits = ["msgspec.Struct"]
+fields = "annotated"

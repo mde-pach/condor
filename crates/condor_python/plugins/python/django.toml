@@ -1,0 +1,45 @@
+[plugin]
+name = "django"
+description = "Model fields, Meta options, framework hooks, template tags and signal receivers."
+when_imported = ["django"]
+
+# Model and form fields are reached through the ORM and forms by name.
+[[fields_used]]
+inherits = ["django.db.models.Model", "django.forms.Form", "django.forms.ModelForm"]
+fields = "assigned"
+
+# Option classes: `class Meta:` in models and forms, admin and migration options.
+[[fields_used]]
+names = ["Meta"]
+fields = "all"
+
+[[fields_used]]
+inherits = ["django.contrib.admin.ModelAdmin", "django.db.migrations.Migration", "django.apps.AppConfig"]
+fields = "assigned"
+
+# Methods Django calls.
+[[used]]
+in_classes_inheriting = ["django.db.models.Model"]
+names = ["save", "delete", "clean", "get_absolute_url"]
+
+[[used]]
+in_classes_inheriting = ["django.views.generic.View", "django.views.View"]
+names = ["get", "post", "put", "patch", "delete", "head", "options", "dispatch", "setup", "get_queryset", "get_object", "get_context_data", "get_success_url", "form_valid", "form_invalid"]
+
+[[used]]
+in_classes_inheriting = ["django.core.management.base.BaseCommand"]
+names = ["handle", "add_arguments"]
+
+[[used]]
+inherits = ["django.core.management.base.BaseCommand"]
+
+[[used]]
+in_classes_inheriting = ["django.apps.AppConfig"]
+names = ["ready"]
+
+# Template filters and tags registered on a `register = template.Library()`.
+[[used]]
+decorated_by = ["register.filter", "register.simple_tag", "register.inclusion_tag", "register.tag"]
+
+[[used]]
+decorated_by = ["django.dispatch.receiver"]

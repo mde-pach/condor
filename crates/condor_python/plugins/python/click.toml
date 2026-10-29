@@ -1,0 +1,7 @@
+[plugin]
+name = "click"
+description = "Commands and groups are called by click through the command line, not by name."
+when_imported = ["click"]
+
+[[used]]
+decorated_by = ["click.command", "click.group", "*.command", "*.group"]

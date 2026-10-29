@@ -1,0 +1,8 @@
+[plugin]
+name = "sqlmodel"
+description = "SQLModel fields are columns read and written by the ORM."
+when_imported = ["sqlmodel"]
+
+[[fields_used]]
+inherits = ["sqlmodel.SQLModel"]
+fields = "annotated"

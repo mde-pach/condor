@@ -1,0 +1,11 @@
+[plugin]
+name = "fastapi"
+description = "Path operations, event handlers, middleware and exception handlers are called by FastAPI through the decorators that register them."
+when_imported = ["fastapi"]
+
+[[used]]
+decorated_by = [
+    "*.get", "*.post", "*.put", "*.patch", "*.delete", "*.head", "*.options", "*.trace",
+    "*.api_route", "*.websocket",
+    "*.on_event", "*.middleware", "*.exception_handler",
+]

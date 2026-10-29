@@ -1,0 +1,108 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/mde-pach/condor-plugins/schema.json",
+  "title": "condor plugin",
+  "description": "Declarative rules that tell condor which definitions a library uses. The same schema applies to TOML and JSON files.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["plugin"],
+  "$defs": {
+    "names": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Dotted names as imported (pydantic.BaseModel), with glob wildcards (*, ?, [abc])."
+    }
+  },
+  "properties": {
+    "plugin": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name"],
+      "properties": {
+        "name": { "type": "string" },
+        "description": { "type": "string" },
+        "when_imported": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Top-level module names; the plugin applies when the project imports one. Empty or absent: always."
+        }
+      }
+    },
+    "used": {
+      "type": "array",
+      "description": "Definitions that are used: functions, methods and classes matching every selector given.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "decorated_by": { "$ref": "#/$defs/names" },
+          "names": { "$ref": "#/$defs/names" },
+          "in_classes_inheriting": { "$ref": "#/$defs/names", "description": "Select methods of classes inheriting from these." },
+          "inherits": { "$ref": "#/$defs/names", "description": "Select classes inheriting from these." }
+        },
+        "minProperties": 1,
+        "not": { "required": ["in_classes_inheriting", "inherits"] }
+      }
+    },
+    "fields_used": {
+      "type": "array",
+      "description": "Attributes of matching classes, and of their subclasses, that are used.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "decorated_by": { "$ref": "#/$defs/names" },
+          "inherits": { "$ref": "#/$defs/names" },
+          "names": { "$ref": "#/$defs/names", "description": "Class names." },
+          "fields": { "enum": ["annotated", "assigned", "all"], "default": "annotated" }
+        },
+        "anyOf": [{ "required": ["decorated_by"] }, { "required": ["inherits"] }, { "required": ["names"] }]
+      }
+    },
+    "parameters_used": {
+      "type": "array",
+      "description": "Functions whose parameters are not reported because their signature is imposed.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "decorated_by": { "$ref": "#/$defs/names" },
+          "names": { "$ref": "#/$defs/names" },
+          "in_classes_inheriting": { "$ref": "#/$defs/names" }
+        },
+        "minProperties": 1
+      }
+    },
+    "injected_by_name": {
+      "type": "array",
+      "description": "Values a framework passes by parameter name, such as pytest fixtures.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["providers"],
+        "properties": {
+          "providers": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "decorated_by": { "$ref": "#/$defs/names" },
+              "names": { "$ref": "#/$defs/names" }
+            },
+            "minProperties": 1
+          },
+          "name_keyword": { "type": "string", "description": "Decorator keyword that renames the provider." },
+          "always_used_keyword": { "type": "string", "description": "Decorator keyword that makes the provider always used when true." },
+          "consumers": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "names": { "$ref": "#/$defs/names", "description": "Function names." },
+              "files": { "type": "array", "items": { "type": "string" }, "description": "File patterns; with a /, matched against the path." }
+            }
+          },
+          "requested_by_calls": { "$ref": "#/$defs/names", "description": "Calls whose string arguments request providers." }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,17 @@
+[plugin]
+name = "typing"
+description = "TypedDict and NamedTuple fields; signatures imposed by protocols, overloads and overrides."
+when_imported = ["typing", "typing_extensions"]
+
+# Keys of a TypedDict and fields of a NamedTuple are set by construction.
+[[fields_used]]
+inherits = ["typing.TypedDict", "typing.NamedTuple", "typing_extensions.TypedDict", "typing_extensions.NamedTuple"]
+fields = "annotated"
+
+# A protocol method only declares a signature.
+[[parameters_used]]
+in_classes_inheriting = ["typing.Protocol", "typing_extensions.Protocol"]
+
+# Overloads declare signatures; overrides must keep the overridden one.
+[[parameters_used]]
+decorated_by = ["typing.overload", "typing.override", "typing_extensions.overload", "typing_extensions.override"]

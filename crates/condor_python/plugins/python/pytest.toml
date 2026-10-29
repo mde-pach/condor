@@ -1,0 +1,14 @@
+[plugin]
+name = "pytest"
+description = "Fixtures are passed by parameter name to tests and to other fixtures."
+when_imported = ["pytest", "pytest_asyncio"]
+
+[[injected_by_name]]
+providers = { decorated_by = ["pytest.fixture", "pytest_asyncio.fixture"] }
+# @pytest.fixture(name="client") is requested as `client`.
+name_keyword = "name"
+# @pytest.fixture(autouse=True) runs without being requested.
+always_used_keyword = "autouse"
+# pytest's default test discovery (python_files, python_functions).
+consumers = { names = ["test*"], files = ["test_*.py", "*_test.py", "conftest.py"] }
+requested_by_calls = ["pytest.mark.usefixtures"]

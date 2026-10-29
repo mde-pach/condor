@@ -1,0 +1,7 @@
+[plugin]
+name = "abc"
+description = "Abstract methods declare the signature their implementations follow."
+when_imported = ["abc"]
+
+[[parameters_used]]
+decorated_by = ["abc.abstractmethod", "abc.abstractproperty", "abc.abstractclassmethod", "abc.abstractstaticmethod"]

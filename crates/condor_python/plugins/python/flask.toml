@@ -1,0 +1,16 @@
+[plugin]
+name = "flask"
+description = "View functions and hooks are called by Flask through the decorators that register them."
+when_imported = ["flask"]
+
+[[used]]
+decorated_by = [
+    "*.route", "*.get", "*.post", "*.put", "*.patch", "*.delete",
+    "*.before_request", "*.after_request", "*.teardown_request", "*.teardown_appcontext",
+    "*.before_app_request", "*.after_app_request",
+    "*.errorhandler", "*.app_errorhandler",
+    "*.context_processor", "*.app_context_processor",
+    "*.template_filter", "*.app_template_filter", "*.template_global", "*.template_test",
+    "*.url_value_preprocessor", "*.url_defaults",
+    "*.cli.command",
+]

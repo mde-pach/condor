@@ -1,0 +1,18 @@
+[package]
+name = "condor"
+description = "A fast, vulture-compatible dead-code finder for Python"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+condor_core.workspace = true
+condor_python.workspace = true
+rayon.workspace = true
+toml.workspace = true
+ignore.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true

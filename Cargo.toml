@@ -1,0 +1,32 @@
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.97"
+license = "MIT"
+repository = "https://github.com/mde-pach/condor"
+
+[workspace.dependencies]
+condor_core = { path = "crates/condor_core" }
+condor_python = { path = "crates/condor_python" }
+# Pinned exactly: the 0.0.x releases carry no API stability promise.
+ruff_python_parser = "=0.0.20"
+ruff_python_ast = "=0.0.20"
+ruff_text_size = "=0.0.20"
+ruff_source_file = "=0.0.20"
+rayon = "1"
+regex = "1"
+encoding_rs = "0.8"
+rustc-hash = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.9"
+ignore = "0.4"
+
+[profile.release]
+lto = "fat"
+codegen-units = 1
+panic = "abort"

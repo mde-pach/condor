@@ -1,0 +1,20 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.97
+      - uses: astral-sh/setup-uv@v6
+      - run: cargo test --workspace
+      - run: cargo build --workspace
+      - name: vulture's test suite against condor
+        run: uv run --python 3.14 --with pytest python tests/upstream/run.py -q
+      - run: cargo build --release
+      - name: Differential test on generated edge cases
+        run: uv run --python 3.14 python harness/difftest.py --only edge-cases --report target/edge-report.md

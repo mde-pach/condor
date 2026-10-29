@@ -1,0 +1,11 @@
+[package]
+name = "condor_core"
+description = "Language-agnostic dead-code engine for condor"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+regex.workspace = true
+rustc-hash.workspace = true

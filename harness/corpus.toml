@@ -1,0 +1,152 @@
+# Corpus for the differential harness. Each project is cloned at a pinned tag
+# (shallow) and both tools run from the project's root directory, so a
+# `[tool.vulture]` section in its pyproject.toml applies to both.
+#
+# `paths` defaults to ["."]. `flags` names flag sets from [flag_sets].
+
+[flag_sets]
+default = []
+min_confidence = ["--min-confidence", "61"]
+sort_by_size = ["--sort-by-size"]
+make_whitelist = ["--make-whitelist"]
+ignores = ["--ignore-names", "test_*,_*,visit_*", "--ignore-decorators", "@app.*,@pytest.*,@property"]
+exclude = ["--exclude", "tests,docs,test_*.py,*/migrations/*"]
+
+[[project]]
+name = "vulture"
+kind = "library (the reference itself)"
+repo = "https://github.com/jendrikseipp/vulture"
+tag = "v2.16"
+flags = ["default", "min_confidence", "sort_by_size", "make_whitelist", "ignores", "exclude"]
+
+[[project]]
+name = "requests"
+kind = "library"
+repo = "https://github.com/psf/requests"
+tag = "v2.32.3"
+flags = ["default", "min_confidence", "sort_by_size", "make_whitelist", "ignores", "exclude"]
+
+[[project]]
+name = "flask"
+kind = "library / web framework"
+repo = "https://github.com/pallets/flask"
+tag = "3.0.3"
+flags = ["default", "min_confidence", "sort_by_size", "make_whitelist", "ignores", "exclude"]
+
+[[project]]
+name = "click"
+kind = "library"
+repo = "https://github.com/pallets/click"
+tag = "8.1.8"
+flags = ["default", "sort_by_size", "make_whitelist", "exclude"]
+
+[[project]]
+name = "attrs"
+kind = "library, uses __all__"
+repo = "https://github.com/python-attrs/attrs"
+tag = "24.3.0"
+flags = ["default", "min_confidence", "make_whitelist", "exclude"]
+
+[[project]]
+name = "httpx"
+kind = "library, uses __all__"
+repo = "https://github.com/encode/httpx"
+tag = "0.28.1"
+flags = ["default", "min_confidence", "sort_by_size", "ignores"]
+
+[[project]]
+name = "rich"
+kind = "library"
+repo = "https://github.com/Textualize/rich"
+tag = "v13.9.4"
+flags = ["default", "sort_by_size", "make_whitelist", "exclude"]
+
+[[project]]
+name = "black"
+kind = "application; test data contains unusual syntax"
+repo = "https://github.com/psf/black"
+tag = "24.10.0"
+flags = ["default", "min_confidence", "ignores", "exclude"]
+
+[[project]]
+name = "fastapi"
+kind = "web framework + many FastAPI apps in docs_src"
+repo = "https://github.com/fastapi/fastapi"
+tag = "0.115.6"
+flags = ["default", "min_confidence", "ignores", "exclude"]
+
+[[project]]
+name = "full-stack-fastapi-template"
+kind = "FastAPI application"
+repo = "https://github.com/fastapi/full-stack-fastapi-template"
+tag = "0.7.1"
+flags = ["default", "min_confidence", "sort_by_size", "make_whitelist", "ignores", "exclude"]
+
+[[project]]
+name = "pydantic"
+kind = "library"
+repo = "https://github.com/pydantic/pydantic"
+tag = "v2.10.4"
+flags = ["default", "min_confidence", "exclude"]
+
+[[project]]
+name = "scrapy"
+kind = "application framework"
+repo = "https://github.com/scrapy/scrapy"
+tag = "2.12.0"
+flags = ["default", "sort_by_size", "exclude"]
+
+[[project]]
+name = "celery"
+kind = "application framework"
+repo = "https://github.com/celery/celery"
+tag = "v5.4.0"
+flags = ["default", "min_confidence", "exclude"]
+
+[[project]]
+name = "django"
+kind = "large web framework"
+repo = "https://github.com/django/django"
+tag = "5.1.4"
+flags = ["default", "min_confidence", "exclude"]
+
+[[project]]
+name = "netbox"
+kind = "Django application"
+repo = "https://github.com/netbox-community/netbox"
+tag = "v4.1.8"
+flags = ["default", "min_confidence", "ignores", "exclude"]
+
+[[project]]
+name = "saleor"
+kind = "large Django application"
+repo = "https://github.com/saleor/saleor"
+tag = "3.20.0"
+flags = ["default", "exclude"]
+
+[[project]]
+name = "sqlalchemy"
+kind = "large library"
+repo = "https://github.com/sqlalchemy/sqlalchemy"
+tag = "rel_2_0_36"
+flags = ["default", "min_confidence"]
+
+[[project]]
+name = "typeshed"
+kind = "stub files (.pyi passed explicitly; directories only yield .py)"
+repo = "https://github.com/python/typeshed"
+tag = "main"
+paths = ["stdlib/builtins.pyi", "stdlib/os/__init__.pyi", "stdlib/typing.pyi", "stdlib/asyncio/tasks.pyi", "stdlib/ast.pyi", "scripts"]
+flags = ["default", "min_confidence", "make_whitelist"]
+
+[[project]]
+name = "cpython-stdlib"
+kind = "CPython 3.14 standard library and its tests (bad syntax and encodings included)"
+local = "python3.14-stdlib"
+flags = ["default", "min_confidence", "sort_by_size"]
+
+[[project]]
+name = "edge-cases"
+kind = "generated: syntax features, noqa, type comments, encodings, errors"
+local = "edge-cases"
+flags = ["default", "min_confidence", "sort_by_size", "make_whitelist", "ignores"]

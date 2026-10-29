@@ -1,0 +1,8 @@
+[plugin]
+name = "dataclasses"
+description = "Dataclass fields are set by the generated __init__ and read by asdict(), replace() and comparisons."
+when_imported = ["dataclasses"]
+
+[[fields_used]]
+decorated_by = ["dataclasses.dataclass"]
+fields = "annotated"
