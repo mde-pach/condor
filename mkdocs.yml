@@ -47,9 +47,7 @@ markdown_extensions:
 
 nav:
   - Home: index.md
-  - Improvements over vulture: improvements.md
+  - Coming from vulture: vulture.md
   - Plugins: plugins.md
-  - vulture compatibility: compatibility.md
-  - Other differences: divergences.md
   - Results: results.md
   - Development: development.md

@@ -103,7 +103,7 @@ fn syntax_error_is_invalid_input() {
     assert!(scan.items.is_empty());
 }
 
-// ----- condor's rules beyond vulture (docs/improvements.md) -----------------
+// ----- condor's rules beyond vulture (spec/improvements.md) -----------------
 
 #[test]
 fn i1_interface_parameters_are_not_reported() {

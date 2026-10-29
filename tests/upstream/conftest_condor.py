@@ -26,7 +26,7 @@ def _condor_sizes(request, monkeypatch):
 
 
 # Upstream tests condor deliberately does not pass, with the reason. Each one
-# is explained in docs/divergences.md or docs/improvements.md.
+# is explained in spec/divergences.md or spec/improvements.md.
 EXPECTED_FAILURES = {
     "test_invalid_type_comment": (
         "D3: condor does not validate type comments against CPython's grammar; "

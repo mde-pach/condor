@@ -6,7 +6,7 @@ from vulture's issue tracker. They are condor's default behaviour; there is no
 option to turn them off.
 
 Rules that depend on a library (parts of I1, I2 and I3) are
-[plugins](plugins.md), which projects can extend; the others are built into
+[plugins](../docs/plugins.md), which projects can extend; the others are built into
 the engine.
 
 ## Fewer false positives

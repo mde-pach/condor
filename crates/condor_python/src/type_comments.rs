@@ -3,7 +3,7 @@
 //! vulture parses `# type: ...` comments and counts the names in them as used.
 //! ruff's parser treats them as ordinary comments, so condor finds them in the
 //! token stream. Only the uses matter for dead code; where CPython would reject
-//! a misplaced type comment, condor does not (docs/divergences.md).
+//! a misplaced type comment, condor does not (spec/divergences.md).
 
 use ruff_python_ast::token::{TokenKind, Tokens};
 use ruff_python_ast::{Expr, ExprContext};

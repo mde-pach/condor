@@ -1,11 +1,11 @@
 """Generate the edge-case corpus for the differential harness.
 
 Each file exercises a rule that decides which dead code is reported or the
-exit code (docs/compatibility.md).
+exit code (spec/compatibility.md).
 
 Usage: python harness/edge_cases.py DEST
 
-Writes hand-written files covering each rule of docs/compatibility.md, plus
+Writes hand-written files covering each rule of spec/compatibility.md, plus
 seeded random modules that share a small pool of names (so that uses in one
 file hide definitions in another). The output is deterministic.
 """

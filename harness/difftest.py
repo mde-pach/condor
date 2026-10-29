@@ -2,7 +2,7 @@
 
 For every project in corpus.toml and every flag set it lists, both tools run
 from the project's root with the same arguments. condor deliberately differs
-from vulture (docs/improvements.md), so the report lists, per run, the
+from vulture (spec/improvements.md), so the report lists, per run, the
 findings only vulture reports and the findings only condor reports, with
 samples, for review. Exit codes are compared too. The results are written to harness/REPORT.md and
 harness/results.json.
@@ -110,7 +110,7 @@ def write_report(results, projects, path):
         "",
         "vulture 2.16 on CPython 3.14 versus condor, run by `harness/difftest.py` on the",
         "corpus in `harness/corpus.toml`. condor deliberately differs from vulture",
-        "(docs/improvements.md): \"only vulture\" counts findings condor no longer",
+        "(spec/improvements.md): \"only vulture\" counts findings condor no longer",
         "reports, \"only condor\" counts new ones. Exit codes are compared.",
         "",
         f"Runs: {len(results)}. Runs with identical findings: {sum(r['stdout_equal'] for r in results)}. "
@@ -176,6 +176,8 @@ def main():
 
     (HERE / "results.json").write_text(json.dumps(results, indent=1) + "\n")
     write_report(results, by_name, Path(args.report))
+    if args.report == str(HERE / "REPORT.md"):
+        subprocess.run([sys.executable, str(HERE / "summarize.py")], check=True)
     exit_diffs = sum(not r["exit_equal"] for r in results)
     print(f"{len(results)} runs, {exit_diffs} with different exit codes")
     sys.exit(1 if exit_diffs else 0)

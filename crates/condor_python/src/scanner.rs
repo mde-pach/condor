@@ -70,7 +70,7 @@ pub fn scan(source: &str, path: Arc<Path>, opts: &ScanOptions) -> FileScan {
     let idx = LineIndex::from_source_text(&source);
     let Some(module) = parsed.syntax().as_module() else { unreachable!("parsed in module mode") };
 
-    // The first syntax error. Its wording is ruff's (docs/divergences.md).
+    // The first syntax error. Its wording is ruff's (spec/divergences.md).
     let error = parsed
         .errors()
         .iter()
