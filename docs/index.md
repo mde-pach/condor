@@ -1,6 +1,6 @@
 # condor
 
-condor finds unused Python code: functions nobody calls, classes nobody uses,
+condor (PyPI: `cndr`) finds unused Python code: functions nobody calls, classes nobody uses,
 imports and variables left behind, and code that can never run. It is a Rust
 reimplementation of [vulture](https://github.com/jendrikseipp/vulture) 2.16
 that keeps vulture's options, configuration and exit codes, runs about 20
@@ -15,12 +15,19 @@ src/app/worker.py:41: unreachable code after 'return' (100% confidence)
 
 ## Install
 
-condor is not on crates.io or PyPI yet. Install it from the repository with a
-Rust toolchain (1.97 or later):
+condor is published on PyPI as `cndr`, with prebuilt binaries for Linux,
+macOS and Windows. It installs two identical commands, `condor` and `cndr`.
 
 ```console
-$ cargo install --git https://github.com/mde-pach/condor condor
+$ uvx cndr .                      # run once, without installing
+$ uv tool install cndr            # install the `condor` command
+$ uv add --dev cndr               # add it to a project's dev dependencies
+$ pip install cndr
 ```
+
+Building from source (for platforms without a prebuilt binary, or with
+`cargo install --git https://github.com/mde-pach/condor condor`) needs Rust
+1.97 or later.
 
 ## Use
 

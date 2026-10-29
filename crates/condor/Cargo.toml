@@ -16,3 +16,11 @@ serde_json.workspace = true
 
 [dev-dependencies]
 serde_json.workspace = true
+
+[[bin]]
+name = "condor"
+path = "src/main.rs"
+
+[[bin]]
+name = "cndr"
+path = "src/bin/cndr.rs"

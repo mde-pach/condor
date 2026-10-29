@@ -33,8 +33,12 @@ Documentation: https://mde-pach.github.io/condor/
 ## Install
 
 ```
-cargo install --git https://github.com/mde-pach/condor condor
+uvx cndr .              # run without installing
+uv tool install cndr    # or: pip install cndr
 ```
+
+The PyPI package is `cndr`; it installs the commands `condor` and `cndr`.
+Building from source needs Rust 1.97 or later.
 
 ## Testing
 

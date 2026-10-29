@@ -1,0 +1,31 @@
+[build-system]
+requires = ["maturin>=1.9,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "cndr"
+description = "condor: a fast, vulture-compatible dead-code finder for Python, written in Rust"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+requires-python = ">=3.8"
+keywords = ["dead code", "unused code", "vulture", "static analysis"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Rust",
+    "Topic :: Software Development :: Quality Assurance",
+]
+dynamic = ["version"]
+
+[project.urls]
+Homepage = "https://github.com/mde-pach/condor"
+Documentation = "https://mde-pach.github.io/condor/"
+Repository = "https://github.com/mde-pach/condor"
+
+[tool.maturin]
+bindings = "bin"
+manifest-path = "crates/condor/Cargo.toml"
+strip = true
