@@ -1,0 +1,99 @@
+/* condor theme: "Diagnostic" — the linter report as identity. */
+
+:root {
+  --condor-ink: #0E1116;
+  --condor-ink-2: #161A21;
+  --condor-line: #222832;
+  --condor-paper: #E6E1D6;
+  --condor-muted: #8A8F98;
+  --condor-amber: #F2A541;
+  --condor-gold: #E0A84B;
+}
+
+/* Dark (default) */
+[data-md-color-scheme="slate"] {
+  --md-hue: 220;
+  --md-default-bg-color: var(--condor-ink);
+  --md-default-fg-color: #C9C4BA;
+  --md-default-fg-color--light: var(--condor-muted);
+  --md-default-fg-color--lighter: #5C626B;
+  --md-default-fg-color--lightest: var(--condor-line);
+  --md-primary-fg-color: #0B0D11;
+  --md-primary-bg-color: var(--condor-paper);
+  --md-accent-fg-color: var(--condor-amber);
+  --md-typeset-color: #C9C4BA;
+  --md-typeset-a-color: var(--condor-amber);
+  --md-code-bg-color: var(--condor-ink-2);
+  --md-code-fg-color: var(--condor-paper);
+  --md-code-hl-string-color: #9FD18B;
+  --md-code-hl-keyword-color: var(--condor-amber);
+  --md-footer-bg-color: #0B0D11;
+  --md-footer-bg-color--dark: #08090C;
+}
+
+/* Light */
+[data-md-color-scheme="default"] {
+  --md-default-bg-color: #F7F5F0;
+  --md-default-fg-color: #2A2D33;
+  --md-primary-fg-color: var(--condor-ink);
+  --md-primary-bg-color: var(--condor-paper);
+  --md-accent-fg-color: #A35F00;
+  --md-typeset-color: #2A2D33;
+  --md-typeset-a-color: #A35F00;
+  --md-code-bg-color: #ECE8DF;
+  --md-code-fg-color: #1A1D23;
+  --md-footer-bg-color: var(--condor-ink);
+}
+
+/* Header and tabs share the near-black bar in both schemes. */
+.md-header, .md-tabs {
+  background-color: #0B0D11;
+  color: var(--condor-paper);
+  border-bottom: 1px solid var(--condor-line);
+  box-shadow: none;
+}
+.md-header__title { font-family: var(--md-code-font-family); font-weight: 800; }
+.md-header__button.md-logo img { height: 1.7rem; }
+
+/* Headings in the monospace face, like the logo. */
+.md-typeset h1, .md-typeset h2, .md-typeset h3 {
+  font-family: var(--md-code-font-family);
+  letter-spacing: -0.02em;
+}
+.md-typeset h1 { font-weight: 800; color: var(--md-default-fg-color); }
+[data-md-color-scheme="slate"] .md-typeset h1,
+[data-md-color-scheme="slate"] .md-typeset h2 { color: var(--condor-paper); }
+
+/* Active navigation entry: amber bar, as in a diagnostic gutter. */
+.md-nav__link--active {
+  color: var(--md-accent-fg-color);
+  font-weight: 600;
+}
+
+/* Code blocks: bordered panels. */
+.md-typeset pre > code {
+  border: 1px solid var(--md-default-fg-color--lightest);
+  border-radius: 10px;
+}
+[data-md-color-scheme="default"] .md-typeset pre > code { border-color: #DDD8CD; }
+
+/* Install cards on the home page. */
+.md-typeset .grid.cards > ul > li {
+  border-radius: 10px;
+  border-color: var(--md-default-fg-color--lightest);
+  background: var(--md-code-bg-color);
+}
+.md-typeset .grid.cards > ul > li:hover {
+  border-color: var(--md-accent-fg-color);
+  box-shadow: none;
+}
+.md-typeset .grid.cards .condor-card-label {
+  font-size: 0.65rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--md-default-fg-color--light);
+}
+
+/* Findings in console examples. */
+.md-typeset .condor-finding { color: var(--condor-amber); }
+[data-md-color-scheme="default"] .md-typeset .condor-finding { color: #A35F00; }

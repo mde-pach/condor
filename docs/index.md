@@ -6,24 +6,34 @@ reimplementation of [vulture](https://github.com/jendrikseipp/vulture) 2.16
 that keeps vulture's options, configuration and exit codes, runs about 20
 times faster, and reports fewer false positives.
 
-```console
-$ condor src/
-src/app/loader.py:12: unused function 'useful_load' (60% confidence)
-src/app/models.py:3: unused import 'json' (90% confidence)
-src/app/worker.py:41: unreachable code after 'return' (100% confidence)
-```
+<pre><code>$ uvx cndr src/
+src/app/loader.py:12: <span class="condor-finding">unused function 'useful_load'</span> (60% confidence)
+src/app/models.py:3: <span class="condor-finding">unused import 'json'</span> (90% confidence)
+src/app/worker.py:41: <span class="condor-finding">unreachable code after 'return'</span> (100% confidence)
+</code></pre>
 
 ## Install
 
 condor is published on PyPI as `cndr`, with prebuilt binaries for Linux,
 macOS and Windows. It installs two identical commands, `condor` and `cndr`.
 
-```console
-$ uvx cndr .                      # run once, without installing
-$ uv tool install cndr            # install the `condor` command
-$ uv add --dev cndr               # add it to a project's dev dependencies
-$ pip install cndr
-```
+<div class="grid cards" markdown>
+
+-   <span class="condor-card-label">Run once</span>
+
+    `uvx cndr .`
+
+-   <span class="condor-card-label">Install the tool</span>
+
+    `uv tool install cndr`
+
+-   <span class="condor-card-label">In a project</span>
+
+    `uv add --dev cndr`
+
+</div>
+
+`pip install cndr` works too.
 
 Building from source (for platforms without a prebuilt binary, or with
 `cargo install --git https://github.com/mde-pach/condor condor`) needs Rust

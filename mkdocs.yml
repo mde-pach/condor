@@ -8,23 +8,36 @@ strict: true
 
 theme:
   name: material
+  logo: assets/logo.svg
+  favicon: assets/favicon.svg
+  font:
+    text: Inter
+    code: JetBrains Mono
   features:
     - content.code.copy
     - navigation.sections
+  # Dark first; the light scheme keeps the dark header.
   palette:
-    - media: "(prefers-color-scheme: light)"
-      scheme: default
-      toggle:
-        icon: material/brightness-7
-        name: Dark mode
-    - media: "(prefers-color-scheme: dark)"
-      scheme: slate
+    - scheme: slate
+      primary: custom
+      accent: custom
       toggle:
         icon: material/brightness-4
         name: Light mode
+    - scheme: default
+      primary: custom
+      accent: custom
+      toggle:
+        icon: material/brightness-7
+        name: Dark mode
+
+extra_css:
+  - stylesheets/condor.css
 
 markdown_extensions:
   - admonition
+  - attr_list
+  - md_in_html
   - tables
   - toc:
       permalink: true
