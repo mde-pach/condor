@@ -8,8 +8,6 @@ strict: true
 
 theme:
   name: material
-  logo: assets/logo.svg
-  favicon: assets/favicon.svg
   font:
     text: Inter
     code: JetBrains Mono

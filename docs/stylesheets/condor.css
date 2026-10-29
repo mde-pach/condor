@@ -53,7 +53,8 @@
   box-shadow: none;
 }
 .md-header__title { font-family: var(--md-code-font-family); font-weight: 800; }
-.md-header__button.md-logo img { height: 1.7rem; }
+/* No logo for now: the site name stands alone. */
+.md-header__button.md-logo { display: none; }
 
 /* Headings in the monospace face, like the logo. */
 .md-typeset h1, .md-typeset h2, .md-typeset h3 {
