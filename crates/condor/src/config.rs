@@ -272,7 +272,7 @@ pub fn make_config(cli: CliArgs, cwd: &Path, toml_content: Option<(&str, String)
     if let Some(v) = cli.only {
         config.only = v;
     }
-    config.config = cli.config;
+    config.config = cli.config.clone();
     if !matches!(config.format.as_str(), "text" | "json" | "sarif") {
         return Outcome::InputError(format!("Unknown format: {} (expected text, json or sarif)", config.format), None);
     }
@@ -284,6 +284,9 @@ pub fn make_config(cli: CliArgs, cwd: &Path, toml_content: Option<(&str, String)
         Some(path) if config.verbose => Some(format!("Reading configuration from {path}")),
         _ => None,
     };
+    if config.paths.is_empty() {
+        config.paths = cli.default_paths;
+    }
     if config.paths.is_empty() {
         return Outcome::InputError("Please pass at least one file or directory".into(), banner);
     }

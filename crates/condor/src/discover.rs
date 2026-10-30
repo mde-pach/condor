@@ -40,16 +40,31 @@ fn rglob_py(dir: &Path, out: &mut Vec<PathBuf>) {
         .ignore(true)
         .require_git(true)
         .follow_links(false)
-        .sort_by_file_name(|a, b| a.cmp(b))
-        .build();
-    for entry in walker.flatten() {
-        let path = entry.path();
-        if entry.depth() > 0
-            && entry.file_name().as_encoded_bytes().ends_with(b".py")
-            && !entry.file_type().is_some_and(|t| t.is_dir())
-            && path.is_file()
-        {
-            out.push(path.to_path_buf());
-        }
-    }
+        .build_parallel();
+    let found = std::sync::Mutex::new(Vec::new());
+    walker.run(|| {
+        let found = &found;
+        let mut local = Vec::new();
+        Box::new(move |entry| {
+            if let Ok(entry) = entry {
+                let path = entry.path();
+                if entry.depth() > 0
+                    && entry.file_name().as_encoded_bytes().ends_with(b".py")
+                    && !entry.file_type().is_some_and(|t| t.is_dir())
+                    && path.is_file()
+                {
+                    local.push(path.to_path_buf());
+                }
+            }
+            if !local.is_empty() {
+                found.lock().unwrap().append(&mut local);
+            }
+            ignore::WalkState::Continue
+        })
+    });
+    // Component-wise order is the order of a walk visiting each directory's
+    // entries sorted by name.
+    let mut found = found.into_inner().unwrap();
+    found.sort();
+    out.extend(found);
 }
