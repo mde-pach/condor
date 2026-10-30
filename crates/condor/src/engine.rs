@@ -91,7 +91,7 @@ impl Engine {
     /// Use `text` instead of the file's content (an editor's unsaved
     /// buffer), or the file again with `None`. `path` must be resolved.
     pub fn set_overlay(&mut self, path: PathBuf, text: Option<String>) {
-        // Native separators, so reports show `pkg\\m.py` on Windows whatever
+        // Native separators, so reports show `pkg\m.py` on Windows whatever
         // the caller wrote.
         let path: PathBuf = path.components().collect();
         match text {

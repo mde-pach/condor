@@ -250,6 +250,8 @@ fn engine_keeps_the_last_parsed_version_while_typing() {
     assert!(condor::run::select(&analysis, &config, &dir).is_empty(), "sub/new.py uses f");
 }
 
+// Windows has no change time to tell such an edit apart.
+#[cfg(unix)]
 #[test]
 fn query_sees_edits_that_restore_size_and_mtime() {
     let dir = project("same_stamp", &[("a.py", "def f():\n    pass\n")]);
