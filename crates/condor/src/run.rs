@@ -30,7 +30,7 @@ pub struct Output {
 }
 
 impl Output {
-    fn line(&mut self, stream: Stream, text: &str) {
+    pub fn line(&mut self, stream: Stream, text: &str) {
         let buf = match stream {
             Stream::Stdout => &mut self.stdout,
             Stream::Stderr => &mut self.stderr,
@@ -55,8 +55,8 @@ pub fn exclude_patterns(exclude: &[String]) -> PatternSet {
     PatternSet::new(&prepared)
 }
 
-/// What one module contributes, computed in parallel.
-enum ModuleResult {
+/// What one module contributes.
+pub enum ModuleResult {
     Excluded,
     Scanned(FileScan),
     /// Not decodable: vulture logs an error and continues.
@@ -64,6 +64,64 @@ enum ModuleResult {
     /// Not readable at all (a directory named `x.py`, permissions): vulture
     /// crashes with a traceback at this point.
     Crash(String),
+}
+
+/// Scan one module; `source` replaces the file's content when given.
+pub fn scan_module(
+    lang: &Python,
+    module: &Path,
+    source: Option<&str>,
+    exclude: &PatternSet,
+    opts: &ScanOptions,
+) -> ModuleResult {
+    if exclude.matches_normcase(&module.to_string_lossy()) {
+        return ModuleResult::Excluded;
+    }
+    if let Some(source) = source {
+        return ModuleResult::Scanned(lang.scan(source, module, opts));
+    }
+    match std::fs::read(module) {
+        Ok(bytes) => match condor_python::read::decode_source(&bytes) {
+            Ok(source) => ModuleResult::Scanned(lang.scan(&source, module, opts)),
+            Err(_) => ModuleResult::Unreadable,
+        },
+        Err(e) => ModuleResult::Crash(e.to_string()),
+    }
+}
+
+/// Write what vulture prints for `module` and add its scan to `analysis`.
+/// Returns the exit code if vulture would have crashed.
+pub fn add_module(
+    module: &Path,
+    result: &ModuleResult,
+    opts: &ScanOptions,
+    analysis: &mut Analysis,
+    out: &mut Output,
+) -> Result<(), i32> {
+    let shown = module.display();
+    if opts.verbose {
+        let verb = if matches!(result, ModuleResult::Excluded) { "Excluded" } else { "Scanning" };
+        out.line(Stream::Stdout, &format!("{verb}: {shown}"));
+    }
+    match result {
+        ModuleResult::Excluded => {}
+        ModuleResult::Scanned(scan) => {
+            out.scan_log(scan);
+            analysis.push(scan.clone());
+        }
+        ModuleResult::Unreadable => {
+            out.line(
+                Stream::Stderr,
+                &format!("Error: Could not read file {shown} - \nTry to change the encoding to UTF-8."),
+            );
+            analysis.push(FileScan { invalid_input: true, ..FileScan::default() });
+        }
+        ModuleResult::Crash(err) => {
+            out.line(Stream::Stderr, &format!("Error: {shown}: {err}"));
+            return Err(INVALID_INPUT);
+        }
+    }
+    Ok(())
 }
 
 /// Scan `modules` and the bundled whitelists, writing logs to `out`. Returns
@@ -76,57 +134,25 @@ pub fn scavenge(
     analysis: &mut Analysis,
     out: &mut Output,
 ) -> Result<(), i32> {
-    let results: Vec<ModuleResult> = modules
-        .par_iter()
-        .map(|module| {
-            if exclude.matches_normcase(&module.to_string_lossy()) {
-                return ModuleResult::Excluded;
-            }
-            match std::fs::read(module) {
-                Ok(bytes) => match condor_python::read::decode_source(&bytes) {
-                    Ok(source) => ModuleResult::Scanned(lang.scan(&source, module, opts)),
-                    Err(_) => ModuleResult::Unreadable,
-                },
-                Err(e) => ModuleResult::Crash(e.to_string()),
-            }
-        })
-        .collect();
-
-    for (module, result) in modules.iter().zip(results) {
-        let shown = module.display();
-        match result {
-            ModuleResult::Excluded => {
-                if opts.verbose {
-                    out.line(Stream::Stdout, &format!("Excluded: {shown}"));
-                }
-            }
-            ModuleResult::Scanned(scan) => {
-                if opts.verbose {
-                    out.line(Stream::Stdout, &format!("Scanning: {shown}"));
-                }
-                out.scan_log(&scan);
-                analysis.push(scan);
-            }
-            ModuleResult::Unreadable => {
-                if opts.verbose {
-                    out.line(Stream::Stdout, &format!("Scanning: {shown}"));
-                }
-                out.line(
-                    Stream::Stderr,
-                    &format!("Error: Could not read file {shown} - \nTry to change the encoding to UTF-8."),
-                );
-                analysis.push(FileScan { invalid_input: true, ..FileScan::default() });
-            }
-            ModuleResult::Crash(err) => {
-                if opts.verbose {
-                    out.line(Stream::Stdout, &format!("Scanning: {shown}"));
-                }
-                out.line(Stream::Stderr, &format!("Error: {shown}: {err}"));
-                return Err(INVALID_INPUT);
-            }
-        }
+    let results: Vec<ModuleResult> =
+        modules.par_iter().map(|module| scan_module(lang, module, None, exclude, opts)).collect();
+    for (module, result) in modules.iter().zip(&results) {
+        add_module(module, result, opts, analysis, out)?;
     }
+    add_whitelists(lang, exclude, opts, analysis, out, |path, source| lang.scan(source, Path::new(path), opts));
+    Ok(())
+}
 
+/// Add the bundled whitelists for the modules the analysis imports; `scan`
+/// scans one of them.
+pub fn add_whitelists(
+    lang: &Python,
+    exclude: &PatternSet,
+    opts: &ScanOptions,
+    analysis: &mut Analysis,
+    out: &mut Output,
+    mut scan: impl FnMut(&str, &str) -> FileScan,
+) {
     for (path, source) in lang.implicit_sources(analysis) {
         if exclude.matches_normcase(&path) {
             if opts.verbose {
@@ -138,11 +164,10 @@ pub fn scavenge(
         if opts.verbose {
             out.line(Stream::Stdout, &format!("Included whitelist: {path}"));
         }
-        let scan = lang.scan(source, Path::new(&path), opts);
+        let scan = scan(&path, source);
         out.scan_log(&scan);
         analysis.push(scan);
     }
-    Ok(())
 }
 
 /// Once every file is scanned: entry points, the language's project-wide
@@ -155,20 +180,37 @@ pub fn finish(lang: &Python, analysis: &mut Analysis, config: &Config, cwd: &Pat
     analysis.check_whitelist_entries(cwd);
 }
 
-/// Print the unused code and return the exit code.
-pub fn report(analysis: &Analysis, config: &Config, cwd: &Path, out: &mut Output) -> i32 {
-    if !(0..=100).contains(&config.min_confidence) {
-        out.line(Stream::Stderr, "Error: --min-confidence must be between 0 and 100.");
-        return INVALID_INPUT;
-    }
+/// The unused code to report, after `--min-confidence`, `--only` and
+/// `--no-report`.
+pub fn select<'a>(analysis: &'a Analysis, config: &Config, cwd: &Path) -> Vec<&'a Item> {
     let only: Vec<ItemKind> = config.only.iter().filter_map(|k| ItemKind::parse(k)).collect();
     let no_report = exclude_patterns(&config.no_report);
-    let items: Vec<&Item> = analysis
+    analysis
         .unused_code(config.min_confidence, config.sort_by_size)
         .into_iter()
         .filter(|i| only.is_empty() || only.contains(&i.kind))
         .filter(|i| config.no_report.is_empty() || !no_report.matches_normcase(&resolve(&i.file, cwd).to_string_lossy()))
-        .collect();
+        .collect()
+}
+
+/// Print the unused code and return the exit code.
+pub fn report(analysis: &Analysis, config: &Config, cwd: &Path, out: &mut Output) -> i32 {
+    report_where(analysis, config, cwd, out, |_| true)
+}
+
+/// [`report`], for the items `keep` accepts.
+pub fn report_where(
+    analysis: &Analysis,
+    config: &Config,
+    cwd: &Path,
+    out: &mut Output,
+    keep: impl Fn(&Item) -> bool,
+) -> i32 {
+    if !(0..=100).contains(&config.min_confidence) {
+        out.line(Stream::Stderr, "Error: --min-confidence must be between 0 and 100.");
+        return INVALID_INPUT;
+    }
+    let items: Vec<&Item> = select(analysis, config, cwd).into_iter().filter(|i| keep(i)).collect();
     match config.format.as_str() {
         "json" => out.line(Stream::Stdout, &crate::output::json(&items, cwd)),
         "sarif" => out.line(Stream::Stdout, &crate::output::sarif(&items, cwd)),
@@ -192,14 +234,13 @@ pub fn report(analysis: &Analysis, config: &Config, cwd: &Path, out: &mut Output
     }
 }
 
-/// The Python front end with the bundled plugins and the project's own
-/// (`plugins` in the configuration: files, or directories of `.toml` and
-/// `.json` files, relative to the current directory).
-pub fn load_python(config: &Config, cwd: &Path) -> Result<Python, String> {
-    let mut python = Python::bundled();
+/// The project's plugin files (`plugins` in the configuration: files, or
+/// directories of `.toml` and `.json` files, relative to the current
+/// directory).
+pub fn plugin_files(config: &Config, cwd: &Path) -> Result<Vec<PathBuf>, String> {
+    let mut files = Vec::new();
     for entry in &config.plugins {
         let path = cwd.join(entry);
-        let mut files = Vec::new();
         if path.is_dir() {
             let mut entries: Vec<PathBuf> = std::fs::read_dir(&path)
                 .map_err(|e| format!("Error: cannot read plugin directory {entry}: {e}"))?
@@ -212,13 +253,19 @@ pub fn load_python(config: &Config, cwd: &Path) -> Result<Python, String> {
         } else {
             files.push(path);
         }
-        for file in files {
-            let content = std::fs::read_to_string(&file)
-                .map_err(|e| format!("Error: cannot read plugin {}: {e}", file.display()))?;
-            let plugin = condor_python::plugins::parse(&file.to_string_lossy(), &content)
-                .map_err(|e| format!("Error: invalid plugin {e}"))?;
-            python.plugins.push(plugin);
-        }
+    }
+    Ok(files)
+}
+
+/// The Python front end with the bundled plugins and the project's own.
+pub fn load_python(config: &Config, cwd: &Path) -> Result<Python, String> {
+    let mut python = Python::bundled();
+    for file in plugin_files(config, cwd)? {
+        let content = std::fs::read_to_string(&file)
+            .map_err(|e| format!("Error: cannot read plugin {}: {e}", file.display()))?;
+        let plugin = condor_python::plugins::parse(&file.to_string_lossy(), &content)
+            .map_err(|e| format!("Error: invalid plugin {e}"))?;
+        python.plugins.push(plugin);
     }
     Ok(python)
 }
@@ -277,7 +324,7 @@ pub fn run(argv: &[String], cwd: &Path, out: &mut Output) -> i32 {
     report(&analysis, &config, cwd, out)
 }
 
-fn emit(exit: Exit, out: &mut Output) -> i32 {
+pub fn emit(exit: Exit, out: &mut Output) -> i32 {
     out.stdout.extend_from_slice(exit.stdout.as_bytes());
     out.stderr.extend_from_slice(exit.stderr.as_bytes());
     exit.code
@@ -288,7 +335,14 @@ pub fn main() -> i32 {
     let argv: Vec<String> = std::env::args_os().skip(1).map(|a| a.to_string_lossy().into_owned()).collect();
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let mut out = Output::default();
-    let code = run(&argv, &cwd, &mut out);
+    // Commands come first; scan a directory with one of these names as `./server`.
+    let code = match argv.first().map(String::as_str) {
+        Some("server") => return crate::server::main(&argv[1..]),
+        #[cfg(unix)]
+        Some("daemon") => return crate::daemon::main(&cwd),
+        Some("query") => crate::query::main(&argv[1..], &cwd, &mut out),
+        _ => run(&argv, &cwd, &mut out),
+    };
     // Output is best effort: a closed pipe must not turn into a crash.
     let _ = std::io::stdout().lock().write_all(&out.stdout);
     let _ = std::io::stderr().lock().write_all(&out.stderr);

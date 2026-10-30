@@ -2,9 +2,14 @@
 
 pub mod args;
 pub mod config;
+#[cfg(unix)]
+pub mod daemon;
 pub mod discover;
+pub mod engine;
 pub mod output;
+pub mod query;
 pub mod run;
+pub mod server;
 
 /// The program name shown in usage and error messages.
 pub const PROG: &str = "condor";

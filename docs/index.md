@@ -50,10 +50,12 @@ $ condor . --min-confidence 80      # only the surest findings
 $ condor . --only function,class    # only some kinds
 $ condor . --format json            # or sarif
 $ condor . --make-whitelist > whitelist.py
+$ condor query src/app.py           # whole project, findings in one file
 ```
 
 Exit status: `0` nothing found, `3` dead code found, `1` a file could not be
-parsed, `2` bad options. `condor --help` lists every option.
+parsed, `2` bad options. `condor --help` lists every option. For editors and coding agents, see
+[editors and agents](editors.md).
 
 ## Configure
 

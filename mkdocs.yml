@@ -52,5 +52,6 @@ nav:
   - Home: index.md
   - Coming from vulture: vulture.md
   - Plugins: plugins.md
+  - Editors and agents: editors.md
   - Results: results.md
   - Development: development.md

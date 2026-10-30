@@ -132,9 +132,19 @@ impl Analysis {
     /// name. A stale entry is reported, and its use no longer counts, so it
     /// cannot hide unrelated dead code with the same name.
     pub fn check_whitelist_entries(&mut self, cwd: &std::path::Path) {
+        let named: FxHashSet<String> =
+            self.scans.iter().flat_map(|s| s.whitelist_entries.iter().map(|e| e.name.clone())).collect();
+        if named.is_empty() {
+            return;
+        }
         let shown = |p: &std::path::Path| crate::paths::format_path(p, cwd).to_string_lossy().into_owned();
-        let defined: FxHashSet<(String, String)> =
-            self.scans.iter().flat_map(|s| s.items.iter()).map(|i| (shown(&i.file), i.name.clone())).collect();
+        let defined: FxHashSet<(String, String)> = self
+            .scans
+            .iter()
+            .flat_map(|s| s.items.iter())
+            .filter(|i| named.contains(&i.name))
+            .map(|i| (shown(&i.file), i.name.clone()))
+            .collect();
         let scanned: FxHashSet<String> = self.scans.iter().filter_map(|s| s.file.as_deref()).map(shown).collect();
         for scan in &mut self.scans {
             if let Some(file) = scan.file.clone() {

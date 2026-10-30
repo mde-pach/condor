@@ -21,6 +21,9 @@ pub struct CliArgs {
     pub format: Option<String>,
     pub no_report: Option<Vec<String>>,
     pub only: Option<Vec<String>>,
+    /// Paths used when neither the command line nor the configuration gives
+    /// any (`.` for `condor query` and `condor server`).
+    pub default_paths: Vec<String>,
 }
 
 /// Parsing stopped: print these and exit with `code`.
@@ -414,6 +417,14 @@ scanned without the files that .gitignore ignores.
 positional arguments:
   PATH                  Python files or directories. For each directory, all
                         contained *.py files are analyzed.
+
+commands:
+  condor query [OPTIONS] [PATH ...]
+                        Report the whole project (the configured paths, or .),
+                        only for PATH if given. A background daemon keeps the
+                        analysis, so later queries rescan only changed files.
+  condor server [OPTIONS]
+                        Language server on stdin and stdout, for editors.
 
 options:
   -h, --help            show this help message and exit

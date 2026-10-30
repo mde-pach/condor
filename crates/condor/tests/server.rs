@@ -1,0 +1,228 @@
+//! The long-running modes: `condor query` (and its daemon) and `condor server`.
+
+use std::io::BufReader;
+use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
+
+use condor::engine::Engine;
+use condor::query::Engines;
+use condor::run::{Output, run};
+use lsp_server::Message;
+use serde_json::{Value, json};
+
+fn project(name: &str, files: &[(&str, &str)]) -> PathBuf {
+    let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join(name);
+    let _ = std::fs::remove_dir_all(&dir);
+    for (path, content) in files {
+        let path = dir.join(path);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, content).unwrap();
+    }
+    // Analysed paths are resolved (`/var` is `/private/var` on macOS).
+    condor_core::paths::resolve(&dir, &dir)
+}
+
+fn query(engines: &mut Engines, dir: &Path, args: &[&str]) -> (i32, String) {
+    let argv: Vec<String> = args.iter().map(|s| s.to_string()).collect();
+    let mut out = Output::default();
+    let code = engines.query(&argv, dir, &mut out);
+    (code, String::from_utf8(out.stdout).unwrap())
+}
+
+fn oneshot(dir: &Path) -> (i32, String) {
+    let mut out = Output::default();
+    let code = run(&[".".to_string()], dir, &mut out);
+    (code, String::from_utf8(out.stdout).unwrap())
+}
+
+#[test]
+fn query_follows_changes_across_files() {
+    let dir = project("query_changes", &[("a.py", "def f():\n    pass\n"), ("b.py", "from a import f\nf()\n")]);
+    let mut engines = Engines::default();
+    assert_eq!(query(&mut engines, &dir, &[]), (0, String::new()));
+    assert_eq!(query(&mut engines, &dir, &[]), oneshot(&dir));
+
+    std::fs::write(dir.join("b.py"), "").unwrap();
+    let expected = "a.py:1: unused function 'f' (60% confidence)\n";
+    assert_eq!(query(&mut engines, &dir, &[]), (3, expected.to_string()));
+    assert_eq!(query(&mut engines, &dir, &[]), oneshot(&dir));
+
+    std::fs::write(dir.join("c.py"), "from a import f\nf()\n").unwrap();
+    assert_eq!(query(&mut engines, &dir, &[]), (0, String::new()));
+    std::fs::remove_file(dir.join("c.py")).unwrap();
+    assert_eq!(query(&mut engines, &dir, &[]).0, 3);
+}
+
+#[test]
+fn query_files_limit_the_report() {
+    let dir = project("query_files", &[("a.py", "def f():\n    pass\n"), ("b.py", "def g():\n    pass\n")]);
+    let mut engines = Engines::default();
+    assert_eq!(query(&mut engines, &dir, &["b.py"]), (3, "b.py:1: unused function 'g' (60% confidence)\n".into()));
+    assert_eq!(query(&mut engines, &dir, &["--only", "class", "b.py"]), (0, String::new()));
+}
+
+#[test]
+fn query_rereads_the_configuration() {
+    let dir = project("query_config", &[("a.py", "def f():\n    pass\n")]);
+    let mut engines = Engines::default();
+    assert_eq!(query(&mut engines, &dir, &[]).0, 3);
+    std::fs::write(dir.join("pyproject.toml"), "[tool.condor]\nignore_names = [\"f\"]\n").unwrap();
+    assert_eq!(query(&mut engines, &dir, &[]), (0, String::new()));
+}
+
+#[test]
+fn engine_uses_unsaved_buffers() {
+    let dir = project("overlay", &[("a.py", "def f():\n    pass\n"), ("b.py", "")]);
+    let config = condor::config::Config { paths: vec![".".into()], ..Default::default() };
+    let mut engine = Engine::new(config.clone(), &dir).unwrap();
+    let unused = |engine: &mut Engine| {
+        engine.refresh().unwrap();
+        let analysis = engine.analyze(&mut Output::default(), false).unwrap();
+        condor::run::select(&analysis, &config, &dir).iter().map(|i| i.name.clone()).collect::<Vec<_>>()
+    };
+    assert_eq!(unused(&mut engine), ["f"]);
+    engine.set_overlay(dir.join("b.py"), Some("from a import f\nf()\n".into()));
+    assert!(unused(&mut engine).is_empty());
+    engine.set_overlay(dir.join("b.py"), None);
+    assert_eq!(unused(&mut engine), ["f"]);
+}
+
+#[cfg(unix)]
+#[test]
+fn query_through_the_daemon() {
+    let dir = project("daemon", &[("a.py", "def f():\n    pass\n"), ("b.py", "from a import f\nf()\n")]);
+    // A short private directory: socket paths are limited to about 100 bytes.
+    let runtime = std::env::temp_dir().join(format!("cdt{}", std::process::id()));
+    std::fs::create_dir_all(&runtime).unwrap();
+    let condor = |args: &[&str]| {
+        let out = Command::new(env!("CARGO_BIN_EXE_condor"))
+            .args(args)
+            .current_dir(&dir)
+            .env("XDG_RUNTIME_DIR", &runtime)
+            .env("CONDOR_DAEMON_IDLE", "60")
+            .output()
+            .unwrap();
+        (out.status.code().unwrap(), String::from_utf8(out.stdout).unwrap())
+    };
+    assert_eq!(condor(&["query"]), (0, String::new()));
+    let sockets: Vec<PathBuf> = std::fs::read_dir(runtime.join(format!("condor-{}", unsafe { libc::getuid() })))
+        .unwrap()
+        .map(|e| e.unwrap().path())
+        .collect();
+    assert_eq!(sockets.len(), 1, "the first query starts a daemon");
+
+    std::fs::write(dir.join("b.py"), "").unwrap();
+    assert_eq!(condor(&["query"]), (3, "a.py:1: unused function 'f' (60% confidence)\n".into()));
+    assert_eq!(condor(&["query"]), condor(&["."]));
+    assert_eq!(condor(&["query", "b.py"]), (0, String::new()));
+
+    use std::io::{BufRead, Write};
+    let mut stream = std::os::unix::net::UnixStream::connect(&sockets[0]).unwrap();
+    stream.write_all(b"{\"op\": \"shutdown\"}\n").unwrap();
+    let mut answer = String::new();
+    BufReader::new(&stream).read_line(&mut answer).unwrap();
+    for _ in 0..200 {
+        if !sockets[0].exists() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    assert!(!sockets[0].exists(), "the daemon removes its socket on shutdown");
+    let _ = std::fs::remove_dir_all(&runtime);
+}
+
+/// A language client talking to `condor server` over stdio.
+struct Client {
+    child: std::process::Child,
+    reader: BufReader<std::process::ChildStdout>,
+    next_id: i32,
+}
+
+impl Client {
+    fn start(root: &Path) -> Client {
+        let mut child = Command::new(env!("CARGO_BIN_EXE_condor"))
+            .arg("server")
+            .current_dir(std::env::temp_dir())
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let reader = BufReader::new(child.stdout.take().unwrap());
+        let mut client = Client { child, reader, next_id: 0 };
+        let root = condor::server::path_to_uri(root).unwrap();
+        let init = client.request("initialize", json!({"rootUri": root.as_str(), "capabilities": {}}));
+        assert_eq!(init["serverInfo"]["name"], "condor");
+        client.notify("initialized", json!({}));
+        client
+    }
+
+    fn send(&mut self, message: Message) {
+        message.write(&mut self.child.stdin.as_mut().unwrap()).unwrap();
+    }
+
+    fn notify(&mut self, method: &str, params: Value) {
+        self.send(lsp_server::Notification::new(method.into(), params).into());
+    }
+
+    fn request(&mut self, method: &str, params: Value) -> Value {
+        self.next_id += 1;
+        let id: lsp_server::RequestId = self.next_id.into();
+        self.send(lsp_server::Request::new(id.clone(), method.into(), params).into());
+        loop {
+            if let Message::Response(response) = Message::read(&mut self.reader).unwrap().unwrap() {
+                assert_eq!(response.id, id);
+                return response.response_result.unwrap();
+            }
+        }
+    }
+
+    /// The next diagnostics published for a file whose URI ends with `name`.
+    fn diagnostics(&mut self, name: &str) -> Vec<Value> {
+        loop {
+            if let Message::Notification(n) = Message::read(&mut self.reader).unwrap().unwrap() {
+                if n.method == "textDocument/publishDiagnostics" && n.params["uri"].as_str().unwrap().ends_with(name) {
+                    return n.params["diagnostics"].as_array().unwrap().clone();
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn language_server() {
+    let dir = project("lsp", &[("a.py", "def f():\n    pass\n\n\ndef g():\n    pass\n"), ("b.py", "from a import f\nf()\n")]);
+    let mut client = Client::start(&dir);
+    let diags = client.diagnostics("a.py");
+    assert_eq!(diags.len(), 1);
+    assert_eq!(diags[0]["message"], "unused function 'g' (60% confidence)");
+    assert_eq!(diags[0]["code"], "V103");
+    assert_eq!(diags[0]["range"], json!({"start": {"line": 4, "character": 0}, "end": {"line": 4, "character": 8}}));
+
+    // An unsaved edit in another file updates a.py.
+    let b = condor::server::path_to_uri(&dir.join("b.py")).unwrap();
+    let doc = json!({"uri": b.as_str(), "languageId": "python", "version": 1, "text": "from a import f\nf()\n"});
+    client.notify("textDocument/didOpen", json!({"textDocument": doc}));
+    let change = json!({"textDocument": {"uri": b.as_str(), "version": 2}, "contentChanges": [{"text": "from a import f, g\nf()\ng()\n"}]});
+    client.notify("textDocument/didChange", change);
+    assert_eq!(client.diagnostics("a.py"), Vec::<Value>::new());
+
+    let change = json!({"textDocument": {"uri": b.as_str(), "version": 3}, "contentChanges": [{"text": "from a import f\nf()\n"}]});
+    client.notify("textDocument/didChange", change);
+    let diags = client.diagnostics("a.py");
+    assert_eq!(diags.len(), 1);
+
+    let a = condor::server::path_to_uri(&dir.join("a.py")).unwrap();
+    let params = json!({
+        "textDocument": {"uri": a.as_str()},
+        "range": diags[0]["range"],
+        "context": {"diagnostics": diags},
+    });
+    let actions = client.request("textDocument/codeAction", params);
+    let edit = &actions[0]["edit"]["changes"][a.as_str()][0];
+    assert_eq!(edit["newText"], "  # noqa: V103");
+    assert_eq!(edit["range"]["start"], json!({"line": 4, "character": 8}));
+
+    client.request("shutdown", Value::Null);
+    client.notify("exit", Value::Null);
+    assert!(client.child.wait().unwrap().success());
+}
