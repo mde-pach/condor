@@ -85,6 +85,17 @@ def main():
     for label, n, vm, vs, cm, cs, ratio in rows:
         lines.append(f"| {label} | {n} | {vm:.3f} ± {vs:.3f} | {cm:.3f} ± {cs:.3f} | {ratio:.0f}× |")
     (HERE / "BENCHMARK.md").write_text("\n".join(lines) + "\n")
+    data = {
+        "machine": cpu or platform.processor(),
+        "cores": os.cpu_count(),
+        "python": sys.version.split()[0],
+        "load_average": round(load, 1),
+        "runs": [
+            {"input": label, "files": n, "vulture_s": round(vm, 4), "condor_s": round(cm, 4)}
+            for label, n, vm, vs, cm, cs, ratio in rows
+        ],
+    }
+    (HERE / "benchmark.json").write_text(json.dumps(data, indent=1) + "\n")
 
 
 if __name__ == "__main__":

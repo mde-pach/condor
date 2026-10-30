@@ -98,3 +98,65 @@
 /* Findings in console examples. */
 .md-typeset .condor-finding { color: var(--condor-amber); }
 [data-md-color-scheme="default"] .md-typeset .condor-finding { color: #A35F00; }
+
+/* ---- Home hero: "condor", its two unused o's flagged, removed: "cndr". ---- */
+[data-md-color-scheme="slate"] .ch-hero {
+  --fg: #E6E1D6; --text: #C9C4BA; --muted: #8A8F98; --amber: #F2A541; --gold: #E0A84B;
+  --panel: #161A21; --line: #222832;
+}
+[data-md-color-scheme="default"] .ch-hero {
+  --fg: #1A1D23; --text: #2A2D33; --muted: #5C626B; --amber: #A35F00; --gold: #A97319;
+  --panel: #ECE8DF; --line: #DDD8CD;
+}
+.md-typeset .ch-hero { display: flex; flex-direction: column; gap: 1.4rem; margin: 1rem 0 2.5rem; }
+.ch-lockup { display: flex; align-items: flex-start; gap: 0.28em; font-size: clamp(56px, 11vw, 112px); }
+.ch-mark { width: 1.05em; height: 1.05em; flex: none; color: var(--gold); }
+.ch-text { display: flex; flex-direction: column; gap: 0.1em; min-width: 0; }
+.md-typeset .ch-word {
+  margin: 0; font: 800 1em/1 var(--md-code-font-family); letter-spacing: -0.02em;
+  color: var(--fg); white-space: nowrap;
+}
+.ch-o { position: relative; display: inline-block; width: 0.6em; }
+.ch-glyph {
+  display: inline-block; text-decoration: underline wavy transparent;
+  text-decoration-thickness: 0.035em; text-underline-offset: 0.12em;
+}
+.ch-report { font: 0.72rem/1.6 var(--md-code-font-family); color: var(--muted); min-height: 3.2em; }
+.ch-report > * { opacity: 0; overflow-wrap: anywhere; }
+.ch-report em { font-style: normal; color: var(--amber); }
+.md-typeset .ch-tag { margin: 0; max-width: 34em; font-size: 0.95rem; color: var(--text); }
+.ch-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 0.6rem; }
+.ch-cmd {
+  display: inline-flex; align-items: center; gap: 0.7rem; height: 2.4rem; padding: 0 0.4rem 0 0.9rem;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+  font: 0.75rem var(--md-code-font-family); color: var(--fg);
+}
+.md-typeset .ch-cmd code { background: none; padding: 0; color: var(--fg); font-size: 0.75rem; }
+.ch-cmd button, .ch-replay {
+  font: 500 0.65rem var(--md-text-font-family); color: var(--muted); background: none;
+  border: 1px solid var(--line); border-radius: 8px; height: 1.7rem; padding: 0 0.6rem; cursor: pointer;
+}
+.ch-cmd button:hover, .ch-replay:hover { color: var(--fg); border-color: var(--muted); }
+.md-typeset .ch-start {
+  display: inline-flex; align-items: center; height: 2.4rem; padding: 0 1rem; border-radius: 10px;
+  background: var(--amber); color: #0E1116; font-weight: 600;
+}
+.md-typeset .ch-start:hover { color: #0E1116; filter: brightness(1.08); }
+
+/* 5.2 s, played once: 1.0 s the o's are flagged, 1.2 / 1.5 s the report,
+   3.2 s the o's and the report vanish, 3.25-3.5 s the letters close up. */
+.ch-play .ch-o { animation: ch-collapse 5.2s ease-in-out forwards; }
+.ch-play .ch-glyph { animation: ch-flag 5.2s step-end forwards; }
+.ch-play .ch-l1 { animation: ch-l1 5.2s step-end forwards; }
+.ch-play .ch-l2 { animation: ch-l2 5.2s step-end forwards; }
+@keyframes ch-flag {
+  0% { color: var(--fg); text-decoration-color: transparent; opacity: 1; }
+  19.2% { color: var(--amber); text-decoration-color: var(--amber); opacity: 1; }
+  61.5%, 100% { color: var(--amber); text-decoration-color: transparent; opacity: 0; } }
+@keyframes ch-collapse { 0%, 62.5% { width: 0.6em; } 67.3%, 100% { width: 0; } }
+@keyframes ch-l1 { 0% { opacity: 0; } 23% { opacity: 1; } 61.5%, 100% { opacity: 0; } }
+@keyframes ch-l2 { 0% { opacity: 0; } 28.8% { opacity: 1; } 61.5%, 100% { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) {
+  .ch-play .ch-o, .ch-play .ch-glyph, .ch-play .ch-l1, .ch-play .ch-l2 { animation: none; }
+  .ch-o { width: 0; } .ch-glyph { opacity: 0; }
+}

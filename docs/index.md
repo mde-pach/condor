@@ -1,14 +1,21 @@
-# condor
-
-Finds unused Python code: functions nobody calls, classes nobody uses,
-leftover imports and variables, unreachable code. A faster
-[vulture](https://github.com/jendrikseipp/vulture) with fewer false positives.
-
-<pre><code>$ uvx cndr src/
-src/app/loader.py:12: <span class="condor-finding">unused function 'useful_load'</span> (60% confidence)
-src/app/models.py:3: <span class="condor-finding">unused import 'json'</span> (90% confidence)
-src/app/worker.py:41: <span class="condor-finding">unreachable code after 'return'</span> (100% confidence)
-</code></pre>
+<section class="ch-hero ch-play" aria-labelledby="hero-name">
+<div class="ch-lockup">
+<svg class="ch-mark" viewBox="0 0 200 200" aria-hidden="true"><g transform="translate(10.5 2)" fill="none" stroke="currentColor" stroke-width="10" stroke-linejoin="round" stroke-linecap="round"><path d="M150 170 C156 140 158 110 150 88 C142 66 124 56 104 58 C108 52 110 46 106 40 C100 30 82 26 66 32 C46 40 40 66 47.5 86.2 C42.6 88.2 38 90.8 34 94 C24 102 21 116 25 128 C27 134 31 138 36 140 C35 131 37 123 44 119 C52 115 62 115 72 117 C86 124 94 146 96 170"/></g><circle cx="122.5" cy="90" r="8" fill="currentColor"/></svg>
+<div class="ch-text">
+<h1 class="ch-word" id="hero-name" aria-label="condor, or cndr"><span>c</span><span class="ch-o"><span class="ch-glyph">o</span></span><span>nd</span><span class="ch-o"><span class="ch-glyph">o</span></span><span>r</span></h1>
+<div class="ch-report" aria-hidden="true">
+<div class="ch-l1">condor:1:2: <em>unused letter 'o'</em> (100% confidence)</div>
+<div class="ch-l2">condor:1:5: <em>unused letter 'o'</em> (100% confidence)</div>
+</div>
+</div>
+</div>
+<p class="ch-tag">Finds unused Python code: functions nobody calls, classes nobody uses, leftover imports and unreachable code. A faster vulture with fewer false positives.</p>
+<div class="ch-actions">
+<span class="ch-cmd"><code>uvx cndr .</code><button type="button">Copy</button></span>
+<a class="ch-start" href="#install">Get started</a>
+<button type="button" class="ch-replay">Replay</button>
+</div>
+</section>
 
 ## Install
 
@@ -29,6 +36,11 @@ The package is `cndr`; it installs the `condor` and `cndr` commands.
     `uv add --dev cndr`
 
 </div>
+
+## Speed
+
+![Scanning Django: condor versus vulture](assets/bench-dark.svg#only-dark)
+![Scanning Django: condor versus vulture](assets/bench-light.svg#only-light)
 
 ## Use
 

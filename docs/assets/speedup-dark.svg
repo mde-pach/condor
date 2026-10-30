@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="720" height="278" viewBox="0 0 720 278" role="img" aria-label="How many times faster condor is than vulture on each input">
+<text x="150" y="24" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="15" font-weight="600" fill="#E6E1D6">How many times faster than vulture</text>
+<text x="138" y="75.5" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" fill="#8A8F98" text-anchor="end">one small file</text>
+<path d="M150 63.0 H619.8107838643677 Q623.8107838643677 63.0 623.8107838643677 67.0 V75.0 Q623.8107838643677 79.0 619.8107838643677 79.0 H150 Z" fill="#F2A541"/>
+<text x="631.8" y="75.5" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" font-weight="600" fill="#E6E1D6">14×</text>
+<text x="138" y="105.5" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" fill="#8A8F98" text-anchor="end">requests (36 files)</text>
+<path d="M150 93.0 H402.6867566660839 Q406.6867566660839 93.0 406.6867566660839 97.0 V105.0 Q406.6867566660839 109.0 402.6867566660839 109.0 H150 Z" fill="#F2A541"/>
+<text x="414.7" y="105.5" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" font-weight="600" fill="#E6E1D6">8×</text>
+<text x="138" y="135.5" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" fill="#8A8F98" text-anchor="end">flask (82 files)</text>
+<path d="M150 123.0 H405.10206371540016 Q409.10206371540016 123.0 409.10206371540016 127.0 V135.0 Q409.10206371540016 139.0 405.10206371540016 139.0 H150 Z" fill="#F2A541"/>
+<text x="417.1" y="135.5" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" font-weight="600" fill="#E6E1D6">8×</text>
+<text x="138" y="165.5" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" fill="#8A8F98" text-anchor="end">rich (190 files)</text>
+<path d="M150 153.0 H518.7321966063572 Q522.7321966063572 153.0 522.7321966063572 157.0 V165.0 Q522.7321966063572 169.0 518.7321966063572 169.0 H150 Z" fill="#F2A541"/>
+<text x="530.7" y="165.5" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" font-weight="600" fill="#E6E1D6">11×</text>
+<text x="138" y="195.5" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" fill="#8A8F98" text-anchor="end">fastapi (1,283 files)</text>
+<path d="M150 183.0 H446.9196503282377 Q450.9196503282377 183.0 450.9196503282377 187.0 V195.0 Q450.9196503282377 199.0 446.9196503282377 199.0 H150 Z" fill="#F2A541"/>
+<text x="458.9" y="195.5" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" font-weight="600" fill="#E6E1D6">9×</text>
+<text x="138" y="225.5" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" fill="#8A8F98" text-anchor="end">django (2,788 files)</text>
+<path d="M150 213.0 H646.0 Q650.0 213.0 650.0 217.0 V225.0 Q650.0 229.0 646.0 229.0 H150 Z" fill="#F2A541"/>
+<text x="658.0" y="225.5" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" font-weight="600" fill="#E6E1D6">15×</text>
+<text x="138" y="255.5" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" fill="#8A8F98" text-anchor="end">saleor (3,524 files)</text>
+<path d="M150 243.0 H512.5235966973295 Q516.5235966973295 243.0 516.5235966973295 247.0 V255.0 Q516.5235966973295 259.0 512.5235966973295 259.0 H150 Z" fill="#F2A541"/>
+<text x="524.5" y="255.5" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" font-weight="600" fill="#E6E1D6">11×</text>
+</svg>

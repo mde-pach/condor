@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="720" height="184" viewBox="0 0 720 184" role="img" aria-label="Scanning Django (2,788 files): condor 399 ms, vulture 6.05 s">
+<text x="96" y="24" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="15" font-weight="600" fill="#1A1D23">Scanning Django (2,788 files)</text>
+<line x1="96.0" y1="48" x2="96.0" y2="144" stroke="#DDD8CD" stroke-width="1"/>
+<text x="96.0" y="162" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" fill="#5C626B" text-anchor="middle">0 s</text>
+<line x1="183.3" y1="48" x2="183.3" y2="144" stroke="#DDD8CD" stroke-width="1"/>
+<text x="183.3" y="162" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" fill="#5C626B" text-anchor="middle">1 s</text>
+<line x1="270.6" y1="48" x2="270.6" y2="144" stroke="#DDD8CD" stroke-width="1"/>
+<text x="270.6" y="162" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" fill="#5C626B" text-anchor="middle">2 s</text>
+<line x1="358.0" y1="48" x2="358.0" y2="144" stroke="#DDD8CD" stroke-width="1"/>
+<text x="358.0" y="162" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" fill="#5C626B" text-anchor="middle">3 s</text>
+<line x1="445.3" y1="48" x2="445.3" y2="144" stroke="#DDD8CD" stroke-width="1"/>
+<text x="445.3" y="162" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" fill="#5C626B" text-anchor="middle">4 s</text>
+<line x1="532.6" y1="48" x2="532.6" y2="144" stroke="#DDD8CD" stroke-width="1"/>
+<text x="532.6" y="162" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" fill="#5C626B" text-anchor="middle">5 s</text>
+<line x1="619.9" y1="48" x2="619.9" y2="144" stroke="#DDD8CD" stroke-width="1"/>
+<text x="619.9" y="162" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" fill="#5C626B" text-anchor="middle">6 s</text>
+<text x="84" y="83.0" font-family="'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace" font-size="14" font-weight="700" fill="#1A1D23" text-anchor="end">condor</text>
+<path d="M96 66.0 H126.81520193166409 Q130.8152019316641 66.0 130.8152019316641 70.0 V86.0 Q130.8152019316641 90.0 126.81520193166409 90.0 H96 Z" fill="#C77A12"/>
+<text x="138.8" y="83.0" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" fill="#1A1D23">399 ms</text>
+<text x="84" y="127.0" font-family="'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace" font-size="14" font-weight="400" fill="#1A1D23" text-anchor="end">vulture</text>
+<path d="M96 110.0 H620.0 Q624.0 110.0 624.0 114.0 V130.0 Q624.0 134.0 620.0 134.0 H96 Z" fill="#7D8794"/>
+<text x="632.0" y="127.0" font-family="Inter, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" fill="#1A1D23">6.05 s</text>
+</svg>

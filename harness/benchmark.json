@@ -1,0 +1,50 @@
+{
+ "machine": "Apple M2",
+ "cores": 8,
+ "python": "3.14.4",
+ "load_average": 6.1,
+ "runs": [
+  {
+   "input": "one small file",
+   "files": 1,
+   "vulture_s": 0.0503,
+   "condor_s": 0.0035
+  },
+  {
+   "input": "requests",
+   "files": 36,
+   "vulture_s": 0.1744,
+   "condor_s": 0.0224
+  },
+  {
+   "input": "flask",
+   "files": 82,
+   "vulture_s": 0.2452,
+   "condor_s": 0.0312
+  },
+  {
+   "input": "rich",
+   "files": 190,
+   "vulture_s": 0.4477,
+   "condor_s": 0.0396
+  },
+  {
+   "input": "fastapi",
+   "files": 1283,
+   "vulture_s": 1.3974,
+   "condor_s": 0.1531
+  },
+  {
+   "input": "django",
+   "files": 2788,
+   "vulture_s": 6.0466,
+   "condor_s": 0.3987
+  },
+  {
+   "input": "saleor",
+   "files": 3524,
+   "vulture_s": 6.249,
+   "condor_s": 0.5621
+  }
+ ]
+}

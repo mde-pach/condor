@@ -32,6 +32,9 @@ theme:
 extra_css:
   - stylesheets/condor.css
 
+extra_javascript:
+  - javascripts/hero.js
+
 markdown_extensions:
   - admonition
   - attr_list

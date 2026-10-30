@@ -5,7 +5,7 @@ Replace `vulture` with `condor` (or `uvx cndr`). Options, `[tool.vulture]`,
 
 ## Better
 
-- **About 20× faster** on large projects.
+- **Much faster**: see the [results](results.md).
 - **Fewer false positives**: framework code (pytest fixtures, pydantic and
   dataclass fields, enum members, Django, Flask, FastAPI, click, Celery),
   protocol and abstract method parameters, and entry points in
