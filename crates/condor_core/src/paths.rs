@@ -5,11 +5,10 @@ use std::path::{Component, Path, PathBuf};
 /// `utils.format_path`: the path relative to `cwd` if it is lexically below it
 /// (`PurePath.relative_to`), otherwise the path unchanged.
 pub fn format_path<'a>(path: &'a Path, cwd: &Path) -> &'a Path {
-    if path.is_absolute() {
-        if let Ok(rel) = path.strip_prefix(cwd) {
+    if path.is_absolute()
+        && let Ok(rel) = path.strip_prefix(cwd) {
             return if rel.as_os_str().is_empty() { Path::new(".") } else { rel };
         }
-    }
     path
 }
 
@@ -62,4 +61,19 @@ pub fn normcase(s: &str) -> std::borrow::Cow<'_, str> {
     } else {
         std::borrow::Cow::Borrowed(s)
     }
+}
+
+/// The dotted module names a file can be imported as (`a/b/c.py`: `c`,
+/// `b.c`, `a.b.c`; `a/b/__init__.py`: `b`, `a.b`).
+pub fn module_names(file: &Path) -> Vec<String> {
+    let mut parts: Vec<String> = Vec::new();
+    let stem = file.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+    if stem != "__init__" {
+        parts.push(stem);
+    }
+    for dir in file.parent().into_iter().flat_map(Path::ancestors).take(8) {
+        let Some(name) = dir.file_name() else { break };
+        parts.push(name.to_string_lossy().into_owned());
+    }
+    (1..=parts.len()).map(|n| parts[..n].iter().rev().cloned().collect::<Vec<_>>().join(".")).collect()
 }

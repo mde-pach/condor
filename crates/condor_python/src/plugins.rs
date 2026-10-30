@@ -20,6 +20,9 @@ use crate::rules::{TAG_CLASS_ATTR, TAG_FIELD};
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Plugin {
+    /// Editor support for JSON plugins (`"$schema": ".../schema.json"`).
+    #[serde(default, rename = "$schema")]
+    pub schema: Option<String>,
     pub plugin: Meta,
     #[serde(default)]
     pub used: Vec<UsedRule>,
@@ -29,6 +32,16 @@ pub struct Plugin {
     pub parameters_used: Vec<ParametersRule>,
     #[serde(default)]
     pub injected_by_name: Vec<InjectedRule>,
+    #[serde(default)]
+    pub variables_used: Vec<VariablesRule>,
+}
+
+/// Module and class variables a framework reads by name (`pytestmark`).
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct VariablesRule {
+    #[serde(deserialize_with = "selectors")]
+    pub names: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -39,7 +52,7 @@ pub struct Meta {
     pub description: String,
     /// The plugin applies when the project imports one of these modules
     /// (top-level names). Empty: always.
-    #[serde(default)]
+    #[serde(default, deserialize_with = "selectors")]
     pub when_imported: Vec<String>,
 }
 
@@ -48,15 +61,19 @@ pub struct Meta {
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct UsedRule {
-    #[serde(default)]
+    #[serde(default, deserialize_with = "selectors")]
     pub decorated_by: Vec<String>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "selectors")]
     pub names: Vec<String>,
     /// Methods of classes inheriting from these.
-    #[serde(default)]
+    #[serde(default, deserialize_with = "selectors")]
     pub in_classes_inheriting: Vec<String>,
+    /// Methods of classes listing one of these among their own bases (not
+    /// their subclasses).
+    #[serde(default, deserialize_with = "selectors")]
+    pub in_classes_based_on: Vec<String>,
     /// Classes inheriting from these.
-    #[serde(default)]
+    #[serde(default, deserialize_with = "selectors")]
     pub inherits: Vec<String>,
 }
 
@@ -73,12 +90,12 @@ pub enum Fields {
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct FieldsRule {
-    #[serde(default)]
+    #[serde(default, deserialize_with = "selectors")]
     pub decorated_by: Vec<String>,
     /// Class names (for example Django's `Meta` option classes).
-    #[serde(default)]
+    #[serde(default, deserialize_with = "selectors")]
     pub names: Vec<String>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "selectors")]
     pub inherits: Vec<String>,
     /// `annotated` (`x: int`), `assigned` (`X = 1`) or `all`.
     #[serde(default)]
@@ -89,12 +106,14 @@ pub struct FieldsRule {
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ParametersRule {
-    #[serde(default)]
+    #[serde(default, deserialize_with = "selectors")]
     pub decorated_by: Vec<String>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "selectors")]
     pub names: Vec<String>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "selectors")]
     pub in_classes_inheriting: Vec<String>,
+    #[serde(default, deserialize_with = "selectors")]
+    pub in_classes_based_on: Vec<String>,
 }
 
 /// Things a framework passes by parameter name, such as pytest fixtures.
@@ -104,27 +123,27 @@ pub struct InjectedRule {
     /// Functions that provide values (fixtures).
     pub providers: FunctionSelector,
     /// Keyword of the provider's decorator that renames it (`name=`).
-    #[serde(default)]
+    #[serde(default, deserialize_with = "string")]
     pub name_keyword: Option<String>,
     /// Keyword of the provider's decorator that makes it always used when
     /// true (`autouse=`).
-    #[serde(default)]
+    #[serde(default, deserialize_with = "string")]
     pub always_used_keyword: Option<String>,
     /// Functions that request providers through their parameters (tests).
     /// Providers request each other too.
     #[serde(default)]
     pub consumers: Consumers,
     /// Calls whose string arguments request providers (`usefixtures`).
-    #[serde(default)]
+    #[serde(default, deserialize_with = "selectors")]
     pub requested_by_calls: Vec<String>,
 }
 
 #[derive(Debug, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct FunctionSelector {
-    #[serde(default)]
+    #[serde(default, deserialize_with = "selectors")]
     pub decorated_by: Vec<String>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "selectors")]
     pub names: Vec<String>,
 }
 
@@ -132,32 +151,84 @@ pub struct FunctionSelector {
 #[serde(deny_unknown_fields)]
 pub struct Consumers {
     /// Function names.
-    #[serde(default)]
+    #[serde(default, deserialize_with = "selectors")]
     pub names: Vec<String>,
     /// File patterns: a pattern with `/` is matched against the path, one
     /// without against the file name. Empty: every file.
-    #[serde(default)]
+    #[serde(default, deserialize_with = "selectors")]
     pub files: Vec<String>,
+}
+
+/// A selector list: given, it names at least one pattern.
+fn selectors<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Vec<String>, D::Error> {
+    let list = Vec::<String>::deserialize(d)?;
+    if list.is_empty() {
+        return Err(serde::de::Error::custom("an empty list selects nothing; leave the key out instead"));
+    }
+    Ok(list)
+}
+
+/// An optional string: absent, not `null`.
+fn string<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<String>, D::Error> {
+    String::deserialize(d).map(Some)
+}
+
+/// The plugin formats, by file extension (case-insensitive).
+pub fn format_of(path: &Path) -> Option<&'static str> {
+    match path.extension()?.to_str()?.to_ascii_lowercase().as_str() {
+        "toml" => Some("toml"),
+        "json" => Some("json"),
+        _ => None,
+    }
 }
 
 /// Parse a plugin file; the format follows the extension (`.toml`, `.json`).
 pub fn parse(path: &str, content: &str) -> Result<Plugin, String> {
-    let plugin: Plugin = if path.ends_with(".json") {
-        serde_json::from_str(content).map_err(|e| format!("{path}: {e}"))?
-    } else {
-        toml::from_str(content).map_err(|e| format!("{path}: {e}"))?
+    let plugin: Plugin = match format_of(Path::new(path)) {
+        Some("json") => {
+            let value: serde_json::Value = serde_json::from_str(content).map_err(|e| format!("{path}: {e}"))?;
+            if !value.is_object() {
+                return Err(format!("{path}: a plugin is a JSON object with a \"plugin\" key"));
+            }
+            serde_json::from_value(value).map_err(|e| format!("{path}: {e}"))?
+        }
+        Some(_) => toml::from_str(content).map_err(|e| format!("{path}: {e}"))?,
+        None => return Err(format!("{path}: a plugin file ends with .toml or .json")),
     };
     validate(&plugin).map_err(|e| format!("{path}: {e}"))?;
     Ok(plugin)
 }
 
 fn validate(p: &Plugin) -> Result<(), String> {
+    if p.plugin.name.trim().is_empty() {
+        return Err("the plugin needs a name".into());
+    }
+    if let Some(m) = p.plugin.when_imported.iter().find(|m| m.contains('.') || m.trim().is_empty()) {
+        return Err(format!("when_imported takes top-level module names (\"{}\" for \"{m}\")", m.split('.').next().unwrap_or(m)));
+    }
+    let patterns = p
+        .used
+        .iter()
+        .flat_map(|r| [&r.decorated_by, &r.names, &r.in_classes_inheriting, &r.in_classes_based_on, &r.inherits])
+        .chain(p.fields_used.iter().flat_map(|r| [&r.decorated_by, &r.names, &r.inherits]))
+        .chain(p.parameters_used.iter().flat_map(|r| [&r.decorated_by, &r.names, &r.in_classes_inheriting, &r.in_classes_based_on]))
+        .chain(p.variables_used.iter().map(|r| &r.names))
+        .chain(p.injected_by_name.iter().flat_map(|r| {
+            [&r.providers.decorated_by, &r.providers.names, &r.consumers.names, &r.consumers.files, &r.requested_by_calls]
+        }))
+        .flatten();
+    for pattern in patterns {
+        if let Some(problem) = pattern_problem(pattern) {
+            return Err(format!("invalid pattern \"{pattern}\": {problem}"));
+        }
+    }
     for r in &p.used {
-        if r.decorated_by.is_empty() && r.names.is_empty() && r.in_classes_inheriting.is_empty() && r.inherits.is_empty() {
+        let methods = !r.in_classes_inheriting.is_empty() || !r.in_classes_based_on.is_empty();
+        if r.decorated_by.is_empty() && r.names.is_empty() && !methods && r.inherits.is_empty() {
             return Err("a [[used]] rule needs at least one selector".into());
         }
-        if !r.inherits.is_empty() && !r.in_classes_inheriting.is_empty() {
-            return Err("a [[used]] rule selects classes (inherits) or methods (in_classes_inheriting), not both".into());
+        if !r.inherits.is_empty() && methods {
+            return Err("a [[used]] rule selects classes (inherits) or methods (in_classes_inheriting, in_classes_based_on), not both".into());
         }
     }
     for r in &p.fields_used {
@@ -166,7 +237,7 @@ fn validate(p: &Plugin) -> Result<(), String> {
         }
     }
     for r in &p.parameters_used {
-        if r.decorated_by.is_empty() && r.names.is_empty() && r.in_classes_inheriting.is_empty() {
+        if r.decorated_by.is_empty() && r.names.is_empty() && r.in_classes_inheriting.is_empty() && r.in_classes_based_on.is_empty() {
             return Err("a [[parameters_used]] rule needs at least one selector".into());
         }
     }
@@ -176,6 +247,30 @@ fn validate(p: &Plugin) -> Result<(), String> {
         }
     }
     Ok(())
+}
+
+/// Why a glob pattern cannot be what was meant (an unclosed `[`, which
+/// fnmatch would take literally).
+fn pattern_problem(pattern: &str) -> Option<&'static str> {
+    if pattern.trim().is_empty() {
+        return Some("empty");
+    }
+    let mut chars = pattern.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c == '[' {
+            // `[]...]` and `[!]...]` include a literal `]`.
+            if chars.peek() == Some(&'!') {
+                chars.next();
+            }
+            if chars.peek() == Some(&']') {
+                chars.next();
+            }
+            if !chars.any(|c| c == ']') {
+                return Some("unclosed [");
+            }
+        }
+    }
+    None
 }
 
 mod bundled {
@@ -226,53 +321,203 @@ impl Selector {
     }
 }
 
-/// Classes by name, for following bases across files.
+/// A class: (scan index, index in `FileScan::classes`).
+type ClassId = (usize, usize);
+
+/// The project's classes and their bases, resolved through each file's
+/// imports to the class they name.
 struct Hierarchy<'a> {
-    classes: FxHashMap<&'a str, Vec<&'a ClassFacts>>,
+    analysis: &'a Analysis,
+    /// Classes by name, per file.
+    local: Vec<FxHashMap<&'a str, Vec<usize>>>,
+    /// The project classes each class's bases resolve to.
+    bases: FxHashMap<ClassId, Vec<ClassId>>,
 }
 
 impl<'a> Hierarchy<'a> {
     fn new(analysis: &'a Analysis) -> Hierarchy<'a> {
-        let mut classes: FxHashMap<&str, Vec<&ClassFacts>> = FxHashMap::default();
-        for c in analysis.scans.iter().flat_map(|s| &s.classes) {
-            classes.entry(c.name.as_str()).or_default().push(c);
+        let mut local: Vec<FxHashMap<&str, Vec<usize>>> = Vec::with_capacity(analysis.scans.len());
+        let mut global: FxHashMap<&str, Vec<ClassId>> = FxHashMap::default();
+        let mut modules: FxHashMap<String, Vec<usize>> = FxHashMap::default();
+        let mut paths: FxHashMap<&Path, usize> = FxHashMap::default();
+        for (si, scan) in analysis.scans.iter().enumerate() {
+            let mut names: FxHashMap<&str, Vec<usize>> = FxHashMap::default();
+            for (ci, c) in scan.classes.iter().enumerate() {
+                names.entry(c.name.as_str()).or_default().push(ci);
+                global.entry(c.name.as_str()).or_default().push((si, ci));
+            }
+            local.push(names);
+            if let Some(file) = scan.file.as_deref() {
+                paths.insert(file, si);
+                for module in condor_core::paths::module_names(file) {
+                    modules.entry(module).or_default().push(si);
+                }
+            }
         }
-        Hierarchy { classes }
+        let mut hierarchy = Hierarchy { analysis, local, bases: FxHashMap::default() };
+        let mut bases = FxHashMap::default();
+        for (si, scan) in analysis.scans.iter().enumerate() {
+            for (ci, c) in scan.classes.iter().enumerate() {
+                let resolved: Vec<ClassId> =
+                    c.bases.iter().flat_map(|b| hierarchy.resolve(si, b, &global, &modules, &paths)).collect();
+                if !resolved.is_empty() {
+                    bases.insert((si, ci), resolved);
+                }
+            }
+        }
+        hierarchy.bases = bases;
+        hierarchy
     }
 
-    /// Whether a class named `name` matches `direct` itself or through any
-    /// of its bases defined in the project.
-    fn reaches(&self, name: &str, direct: &dyn Fn(&ClassFacts) -> bool, memo: &mut FxHashMap<String, bool>) -> bool {
-        if let Some(&known) = memo.get(name) {
-            return known;
+    fn class(&self, (si, ci): ClassId) -> &'a ClassFacts {
+        &self.analysis.scans[si].classes[ci]
+    }
+
+    /// Classes named `name` defined in file `si`, top-level ones first.
+    fn named(&self, si: usize, name: &str) -> Vec<ClassId> {
+        let Some(found) = self.local[si].get(name) else { return Vec::new() };
+        let top: Vec<ClassId> =
+            found.iter().filter(|&&ci| self.analysis.scans[si].classes[ci].class.is_none()).map(|&ci| (si, ci)).collect();
+        if top.is_empty() { found.iter().map(|&ci| (si, ci)).collect() } else { top }
+    }
+
+    /// The project classes a base written in file `si` refers to. A base
+    /// imported from outside the project resolves to nothing (selectors
+    /// match its dotted name directly).
+    fn resolve(
+        &self,
+        si: usize,
+        base: &str,
+        global: &FxHashMap<&str, Vec<ClassId>>,
+        modules: &FxHashMap<String, Vec<usize>>,
+        paths: &FxHashMap<&Path, usize>,
+    ) -> Vec<ClassId> {
+        let by_name = |name: &str| global.get(name).cloned().unwrap_or_default();
+        if let Some(rest) = base.strip_prefix('.') {
+            // Relative import: `.models.Base` is `Base` in `./models.py`.
+            let level = 1 + rest.len() - rest.trim_start_matches('.').len();
+            let rest = rest.trim_start_matches('.');
+            let (module, name) = rest.rsplit_once('.').unwrap_or(("", rest));
+            let Some(mut dir) = self.analysis.scans[si].file.as_deref().and_then(Path::parent) else { return by_name(name) };
+            for _ in 1..level {
+                dir = dir.parent().unwrap_or(dir);
+            }
+            let module_dir = module.split('.').filter(|p| !p.is_empty()).fold(dir.to_path_buf(), |d, p| d.join(p));
+            let candidates = if module.is_empty() {
+                vec![dir.join("__init__.py")]
+            } else {
+                vec![module_dir.with_extension("py"), module_dir.join("__init__.py")]
+            };
+            for file in &candidates {
+                if let Some(&target) = paths.get(file.as_path()) {
+                    let found = self.named(target, name);
+                    return if found.is_empty() { by_name(name) } else { found };
+                }
+            }
+            return by_name(name);
         }
-        memo.insert(name.to_string(), false); // cycles
-        let found = self.classes.get(name).into_iter().flatten().any(|c| {
-            direct(c)
-                || c.bases.iter().any(|b| self.reaches(b.rsplit('.').next().unwrap_or(b), direct, memo))
-        });
-        memo.insert(name.to_string(), found);
-        found
+        match base.rsplit_once('.') {
+            // Defined in this file, else (a star import) any project class
+            // of that name.
+            None => {
+                let found = self.named(si, base);
+                if found.is_empty() { by_name(base) } else { found }
+            }
+            Some((module, name)) => match modules.get(module) {
+                Some(files) => {
+                    let found: Vec<ClassId> = files.iter().flat_map(|&f| self.named(f, name)).collect();
+                    // Re-exported by the module (`from .base import Base`).
+                    if found.is_empty() { by_name(name) } else { found }
+                }
+                None => Vec::new(),
+            },
+        }
+    }
+
+    /// Whether class `start` matches `direct` itself or through any of its
+    /// project bases. Iterative, so deep hierarchies cannot overflow.
+    fn reaches(&self, start: ClassId, direct: &dyn Fn(ClassId) -> bool, memo: &mut FxHashMap<ClassId, bool>) -> bool {
+        let mut stack = vec![(start, false)];
+        let mut open: FxHashSet<ClassId> = FxHashSet::default();
+        while let Some((node, expanded)) = stack.pop() {
+            if memo.contains_key(&node) {
+                continue;
+            }
+            let bases = self.bases.get(&node).map(Vec::as_slice).unwrap_or_default();
+            if expanded {
+                // A base still open is a cycle: it adds nothing.
+                let found = bases.iter().any(|b| memo.get(b) == Some(&true));
+                memo.insert(node, found);
+                open.remove(&node);
+            } else if direct(node) {
+                memo.insert(node, true);
+            } else if open.insert(node) {
+                stack.push((node, true));
+                stack.extend(bases.iter().filter(|b| !memo.contains_key(b) && !open.contains(b)).map(|&b| (b, false)));
+            }
+        }
+        memo.get(&start).copied().unwrap_or(false)
+    }
+}
+
+/// Where a plugin's rules apply. Rules that follow class hierarchies apply
+/// anywhere, since bases are resolved. Others (decorator patterns such as
+/// `*.get`, class names such as `Meta`) apply in files that import the
+/// plugin's modules, or to decorators whose object is imported (`from
+/// myapp import app; @app.route`), so a same-named local helper elsewhere
+/// is not taken for the framework.
+struct Gate<'p> {
+    open: Vec<bool>,
+    modules: &'p [String],
+}
+
+impl<'p> Gate<'p> {
+    fn new(analysis: &Analysis, plugin: &'p Plugin) -> Gate<'p> {
+        let modules = &plugin.plugin.when_imported;
+        let open = analysis
+            .scans
+            .iter()
+            .map(|s| modules.is_empty() || s.imports.iter().any(|m| modules.contains(m)))
+            .collect();
+        Gate { open, modules }
+    }
+
+    fn file(&self, si: usize) -> bool {
+        self.open[si]
+    }
+
+    fn decorator(&self, si: usize, d: &Decorator) -> bool {
+        self.open[si] || d.imported || self.modules.iter().any(|m| d.name.strip_prefix(m.as_str()).is_some_and(|r| r.starts_with('.')))
+    }
+
+    /// `selector` matches one of `decorators` in file `si`.
+    fn decorated(&self, si: usize, selector: &Selector, decorators: &[Decorator]) -> bool {
+        decorators.iter().any(|d| selector.matches(&d.name) && self.decorator(si, d))
     }
 }
 
 /// A class selector over the hierarchy: `decorated_by` on the class or a
-/// project base, `inherits` on any base along the way.
+/// project base, `inherits` on any base along the way, `names` on the class
+/// itself. With `direct_only`, `inherits` looks at the class's own bases.
 struct ClassMatcher<'h, 'a> {
     hierarchy: &'h Hierarchy<'a>,
+    gate: &'h Gate<'h>,
     decorated_by: Selector,
     inherits: Selector,
     names: Selector,
-    memo: FxHashMap<String, bool>,
+    direct_only: bool,
+    memo: FxHashMap<ClassId, bool>,
 }
 
 impl<'h, 'a> ClassMatcher<'h, 'a> {
-    fn new(hierarchy: &'h Hierarchy<'a>, decorated_by: &[String], inherits: &[String]) -> Self {
+    fn new(hierarchy: &'h Hierarchy<'a>, gate: &'h Gate<'h>, decorated_by: &[String], inherits: &[String]) -> Self {
         ClassMatcher {
             hierarchy,
+            gate,
             decorated_by: Selector::new(decorated_by),
             inherits: Selector::new(inherits),
             names: Selector::new(&[]),
+            direct_only: false,
             memo: FxHashMap::default(),
         }
     }
@@ -282,19 +527,34 @@ impl<'h, 'a> ClassMatcher<'h, 'a> {
         self
     }
 
-    fn matches(&mut self, class: &str) -> bool {
-        if !self.names.is_empty() && self.names.matches(class) {
+    fn direct_only(mut self) -> Self {
+        self.direct_only = true;
+        self
+    }
+
+    /// Whether a class named `class` in file `si` matches.
+    fn matches(&mut self, si: usize, class: &str) -> bool {
+        if !self.names.is_empty() && self.names.matches(class) && self.gate.file(si) {
             return true;
         }
-        let (decorated_by, inherits) = (&self.decorated_by, &self.inherits);
-        if decorated_by.is_empty() && inherits.is_empty() {
+        if self.decorated_by.is_empty() && self.inherits.is_empty() {
             return false;
         }
-        let direct = |c: &ClassFacts| {
-            (!decorated_by.is_empty() && decorated_by.any_decorator(&c.decorators))
+        let ids = self.hierarchy.named(si, class);
+        ids.into_iter().any(|id| self.matches_id(id))
+    }
+
+    fn matches_id(&mut self, id: ClassId) -> bool {
+        let (hierarchy, gate, decorated_by, inherits) = (self.hierarchy, self.gate, &self.decorated_by, &self.inherits);
+        let direct = |id: ClassId| {
+            let c = hierarchy.class(id);
+            (!decorated_by.is_empty() && gate.decorated(id.0, decorated_by, &c.decorators))
                 || (!inherits.is_empty() && c.bases.iter().any(|b| inherits.matches(b)))
         };
-        self.hierarchy.reaches(class, &direct, &mut self.memo)
+        if self.direct_only {
+            return direct(id);
+        }
+        hierarchy.reaches(id, &direct, &mut self.memo)
     }
 }
 
@@ -326,28 +586,37 @@ pub fn apply(analysis: &mut Analysis, plugins: &[Plugin]) {
     let mut remove: FxHashSet<(usize, usize)> = FxHashSet::default();
 
     for plugin in &active {
+        let gate = Gate::new(analysis, plugin);
         for rule in &plugin.used {
             let decorated_by = Selector::new(&rule.decorated_by);
             let names = Selector::new(&rule.names);
-            let mut in_classes = ClassMatcher::new(&hierarchy, &[], &rule.in_classes_inheriting);
-            let mut classes = ClassMatcher::new(&hierarchy, &[], &rule.inherits);
+            let mut in_classes = ClassMatcher::new(&hierarchy, &gate, &[], &rule.in_classes_inheriting);
+            let mut based_on = ClassMatcher::new(&hierarchy, &gate, &[], &rule.in_classes_based_on).direct_only();
+            let mut classes = ClassMatcher::new(&hierarchy, &gate, &[], &rule.inherits);
+            let methods = !rule.in_classes_inheriting.is_empty() || !rule.in_classes_based_on.is_empty();
             for (si, scan) in analysis.scans.iter().enumerate() {
+                // Without a class hierarchy to follow, the rule applies
+                // where the framework is in use.
+                let anchored = methods || !rule.inherits.is_empty();
+                let names_ok = |name: &str| names.is_empty() || (names.matches(name) && (anchored || gate.file(si)));
                 if rule.inherits.is_empty() {
                     for f in &scan.functions {
-                        let ok = (decorated_by.is_empty() || decorated_by.any_decorator(&f.decorators))
-                            && (names.is_empty() || names.matches(&f.name))
+                        let ok = (decorated_by.is_empty() || gate.decorated(si, &decorated_by, &f.decorators))
+                            && names_ok(&f.name)
                             && (rule.in_classes_inheriting.is_empty()
-                                || f.class.as_deref().is_some_and(|c| in_classes.matches(c)));
+                                || f.class.as_deref().is_some_and(|c| in_classes.matches(si, c)))
+                            && (rule.in_classes_based_on.is_empty()
+                                || f.class.as_deref().is_some_and(|c| based_on.matches(si, c)));
                         if ok {
                             remove.extend(f.item.map(|i| (si, i)));
                         }
                     }
                 }
-                if rule.in_classes_inheriting.is_empty() {
-                    for c in &scan.classes {
-                        let ok = (decorated_by.is_empty() || decorated_by.any_decorator(&c.decorators))
-                            && (names.is_empty() || names.matches(&c.name))
-                            && (rule.inherits.is_empty() || classes.matches(&c.name));
+                if !methods {
+                    for (ci, c) in scan.classes.iter().enumerate() {
+                        let ok = (decorated_by.is_empty() || gate.decorated(si, &decorated_by, &c.decorators))
+                            && names_ok(&c.name)
+                            && (rule.inherits.is_empty() || classes.matches_id((si, ci)));
                         if ok {
                             remove.extend(c.item.map(|i| (si, i)));
                         }
@@ -357,7 +626,8 @@ pub fn apply(analysis: &mut Analysis, plugins: &[Plugin]) {
         }
 
         for rule in &plugin.fields_used {
-            let mut matcher = ClassMatcher::new(&hierarchy, &rule.decorated_by, &rule.inherits).with_names(&rule.names);
+            let mut matcher =
+                ClassMatcher::new(&hierarchy, &gate, &rule.decorated_by, &rule.inherits).with_names(&rule.names);
             for (si, scan) in analysis.scans.iter().enumerate() {
                 for (ii, item) in scan.items.iter().enumerate() {
                     let wanted = match item.tag {
@@ -365,7 +635,7 @@ pub fn apply(analysis: &mut Analysis, plugins: &[Plugin]) {
                         TAG_CLASS_ATTR => rule.fields != Fields::Annotated,
                         _ => false,
                     };
-                    if wanted && item.context.as_deref().is_some_and(|c| matcher.matches(c)) {
+                    if wanted && item.context.as_deref().is_some_and(|c| matcher.matches(si, c)) {
                         remove.insert((si, ii));
                     }
                 }
@@ -375,13 +645,17 @@ pub fn apply(analysis: &mut Analysis, plugins: &[Plugin]) {
         for rule in &plugin.parameters_used {
             let decorated_by = Selector::new(&rule.decorated_by);
             let names = Selector::new(&rule.names);
-            let mut in_classes = ClassMatcher::new(&hierarchy, &[], &rule.in_classes_inheriting);
+            let mut in_classes = ClassMatcher::new(&hierarchy, &gate, &[], &rule.in_classes_inheriting);
+            let mut based_on = ClassMatcher::new(&hierarchy, &gate, &[], &rule.in_classes_based_on).direct_only();
+            let anchored = !rule.in_classes_inheriting.is_empty() || !rule.in_classes_based_on.is_empty();
             for (si, scan) in analysis.scans.iter().enumerate() {
                 for f in &scan.functions {
-                    let ok = (decorated_by.is_empty() || decorated_by.any_decorator(&f.decorators))
-                        && (names.is_empty() || names.matches(&f.name))
+                    let ok = (decorated_by.is_empty() || gate.decorated(si, &decorated_by, &f.decorators))
+                        && (names.is_empty() || (names.matches(&f.name) && (anchored || gate.file(si))))
                         && (rule.in_classes_inheriting.is_empty()
-                            || f.class.as_deref().is_some_and(|c| in_classes.matches(c)));
+                            || f.class.as_deref().is_some_and(|c| in_classes.matches(si, c)))
+                        && (rule.in_classes_based_on.is_empty()
+                            || f.class.as_deref().is_some_and(|c| based_on.matches(si, c)));
                     if ok {
                         remove.extend(f.params.iter().filter_map(|(_, i)| i.map(|i| (si, i))));
                     }
@@ -391,6 +665,17 @@ pub fn apply(analysis: &mut Analysis, plugins: &[Plugin]) {
 
         for rule in &plugin.injected_by_name {
             apply_injected(analysis, rule, &mut remove);
+        }
+
+        for rule in &plugin.variables_used {
+            let names = Selector::new(&rule.names);
+            for (si, scan) in analysis.scans.iter().enumerate().filter(|(si, _)| gate.file(*si)) {
+                for (ii, item) in scan.items.iter().enumerate() {
+                    if item.kind == condor_core::ItemKind::Variable && names.matches(&item.name) {
+                        remove.insert((si, ii));
+                    }
+                }
+            }
         }
     }
 

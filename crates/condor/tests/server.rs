@@ -1,6 +1,8 @@
 //! The long-running modes: `condor query` (and its daemon) and `condor server`.
 
-use std::io::BufReader;
+#[cfg(unix)]
+use std::io::BufRead;
+use std::io::{BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
@@ -116,7 +118,6 @@ fn query_through_the_daemon() {
     assert_eq!(condor(&["query"]), condor(&["."]));
     assert_eq!(condor(&["query", "b.py"]), (0, String::new()));
 
-    use std::io::{BufRead, Write};
     let mut stream = std::os::unix::net::UnixStream::connect(&sockets[0]).unwrap();
     stream.write_all(b"{\"op\": \"shutdown\"}\n").unwrap();
     let mut answer = String::new();
@@ -183,11 +184,10 @@ impl Client {
     /// The next diagnostics published for a file whose URI ends with `name`.
     fn diagnostics(&mut self, name: &str) -> Vec<Value> {
         loop {
-            if let Message::Notification(n) = Message::read(&mut self.reader).unwrap().unwrap() {
-                if n.method == "textDocument/publishDiagnostics" && n.params["uri"].as_str().unwrap().ends_with(name) {
+            if let Message::Notification(n) = Message::read(&mut self.reader).unwrap().unwrap()
+                && n.method == "textDocument/publishDiagnostics" && n.params["uri"].as_str().unwrap().ends_with(name) {
                     return n.params["diagnostics"].as_array().unwrap().clone();
                 }
-            }
         }
     }
 }
@@ -274,11 +274,10 @@ fn language_server_folders_and_noqa() {
     let mut client = Client::start_with(json!({"workspaceFolders": folders, "capabilities": {}}));
     let mut seen = std::collections::HashMap::new();
     while seen.len() < 2 {
-        if let Message::Notification(n) = Message::read(&mut client.reader).unwrap().unwrap() {
-            if n.method == "textDocument/publishDiagnostics" {
+        if let Message::Notification(n) = Message::read(&mut client.reader).unwrap().unwrap()
+            && n.method == "textDocument/publishDiagnostics" {
                 seen.insert(n.params["uri"].as_str().unwrap().rsplit('/').next().unwrap().to_string(), n.params["diagnostics"].clone());
             }
-        }
     }
     assert_eq!(seen["b.py"][0]["message"], "unused function 'g' (60% confidence)");
     let diags = seen["a.py"].as_array().unwrap().clone();
@@ -293,4 +292,53 @@ fn language_server_folders_and_noqa() {
     client.request("shutdown", Value::Null);
     client.notify("exit", Value::Null);
     assert!(client.child.wait().unwrap().success());
+}
+
+#[test]
+fn language_server_rejects_oversized_messages() {
+    let mut child = Command::new(env!("CARGO_BIN_EXE_condor"))
+        .arg("server")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child.stdin.take().unwrap().write_all(b"Content-Length: 99999999999999999\r\n\r\n").unwrap();
+    let out = child.wait_with_output().unwrap();
+    assert!(String::from_utf8_lossy(&out.stderr).contains("too large"));
+}
+
+#[cfg(unix)]
+#[test]
+fn a_stalled_client_does_not_block_the_daemon() {
+    let dir = project("stalled", &[("a.py", "x = 1\n")]);
+    let runtime = std::env::temp_dir().join(format!("cds{}", std::process::id()));
+    std::fs::create_dir_all(&runtime).unwrap();
+    let query = || {
+        Command::new(env!("CARGO_BIN_EXE_condor"))
+            .arg("query")
+            .current_dir(&dir)
+            .env("XDG_RUNTIME_DIR", &runtime)
+            .env("CONDOR_DAEMON_IDLE", "60")
+            .output()
+            .unwrap()
+    };
+    assert_eq!(query().status.code(), Some(3));
+    let socket = std::fs::read_dir(runtime.join(format!("condor-{}", unsafe { libc::getuid() })))
+        .unwrap()
+        .next()
+        .unwrap()
+        .unwrap()
+        .path();
+    let mut stalled = std::os::unix::net::UnixStream::connect(&socket).unwrap();
+    stalled.write_all(b"{\"argv\": [").unwrap();
+    let start = std::time::Instant::now();
+    assert_eq!(query().status.code(), Some(3));
+    assert!(start.elapsed() < std::time::Duration::from_secs(10));
+    drop(stalled);
+    let mut stop = std::os::unix::net::UnixStream::connect(&socket).unwrap();
+    stop.write_all(b"{\"op\": \"shutdown\"}\n").unwrap();
+    let mut answer = String::new();
+    let _ = BufReader::new(&stop).read_line(&mut answer);
+    let _ = std::fs::remove_dir_all(&runtime);
 }

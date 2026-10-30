@@ -48,9 +48,9 @@ impl ItemKind {
 
     /// Parse a kind name (as in `--only`) or its noqa code.
     pub fn parse(s: &str) -> Option<ItemKind> {
-        let s = s.trim();
+        let s = s.trim().to_ascii_lowercase();
         ItemKind::ALL.into_iter().find(|k| {
-            k.as_str() == s || k.noqa_code().eq_ignore_ascii_case(s) || (s == "unreachable" && *k == ItemKind::UnreachableCode)
+            k.as_str() == s || k.noqa_code().eq_ignore_ascii_case(&s) || (s == "unreachable" && *k == ItemKind::UnreachableCode)
         })
     }
 

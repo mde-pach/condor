@@ -136,3 +136,125 @@ fn invalid_plugin_is_an_error() {
     );
     assert_eq!(condor(&dir, &["m.py"]).0, 2);
 }
+
+fn condor_err(dir: &Path, args: &[&str]) -> (i32, String, String) {
+    let argv: Vec<String> = args.iter().map(|s| s.to_string()).collect();
+    let mut out = Output::default();
+    let code = run(&argv, dir, &mut out);
+    (code, String::from_utf8(out.stdout).unwrap(), String::from_utf8(out.stderr).unwrap())
+}
+
+// ----- regressions found by the 0.2.0 audit --------------------------------
+
+#[test]
+fn machine_output_stays_parseable() {
+    let dir = project("machine_output", &[("dir with space/m%#.py", "def f(): pass\n"), ("bad.py", "def (:\n")]);
+    let (code, out, err) = condor_err(&dir, &["--format", "json", "-v", "."]);
+    assert_eq!(code, 3);
+    assert!(serde_json::from_str::<serde_json::Value>(&out).is_ok(), "verbose lines stay off stdout");
+    assert!(err.contains("Scanning:"));
+    let (_, out, _) = condor_err(&dir, &["--format", "sarif", "."]);
+    let log: serde_json::Value = serde_json::from_str(&out).unwrap();
+    let run = &log["runs"][0];
+    let location = &run["results"][0]["locations"][0]["physicalLocation"]["artifactLocation"];
+    assert_eq!(location["uri"], "dir%20with%20space/m%25%23.py");
+    assert_eq!(location["uriBaseId"], "%SRCROOT%");
+    assert_eq!(run["invocations"][0]["executionSuccessful"], false);
+    assert!(run["invocations"][0]["toolExecutionNotifications"][0]["message"]["text"].as_str().unwrap().contains("bad.py"));
+}
+
+#[test]
+fn option_errors() {
+    let dir = project("option_errors", &[("m.py", "def f(): pass\n")]);
+    assert_eq!(condor(&dir, &["--config", "missing.toml", "m.py"]).0, 2);
+    assert_eq!(condor(&dir, &["--make-whitelist", "--format", "json", "m.py"]).0, 2);
+    assert_eq!(condor(&dir, &["--only", "Function", "m.py"]).0, 3);
+    assert_eq!(condor(&dir, &["--only", ",", "m.py"]).0, 2);
+    std::fs::write(dir.join("pyproject.toml"), "[tool]\ncondor = \"x\"\n").unwrap();
+    assert_eq!(condor(&dir, &["m.py"]).0, 2);
+}
+
+#[test]
+fn plugin_files() {
+    let rule = |name: &str, f: &str| format!("[plugin]\nname = \"{name}\"\n[[used]]\nnames = [\"{f}\"]\n");
+    let dir = project(
+        "plugin_files",
+        &[
+            ("proj/pyproject.toml", "[tool.condor]\nplugins = [\"rules\"]\n"),
+            ("proj/rules/nested/a.TOML", &rule("a", "f")),
+            ("proj/rules/schema.json", "{}"),
+            ("proj/src/m.py", "def f(): pass\ndef g(): pass\n"),
+        ],
+    );
+    // Relative to the configuration file, searched recursively.
+    let (code, out) = condor(&dir, &["--config", "proj/pyproject.toml", "proj/src"]);
+    assert_eq!((code, out.as_str()), (3, "proj/src/m.py:2: unused function 'g' (60% confidence)\n"));
+    std::fs::write(dir.join("proj/rules/b.toml"), rule("a", "g")).unwrap();
+    assert_eq!(condor(&dir, &["--config", "proj/pyproject.toml", "proj/src"]).0, 2, "two plugins named a");
+}
+
+#[test]
+fn project_plugin_replaces_bundled_one() {
+    let dir = project(
+        "plugin_replace",
+        &[
+            ("pyproject.toml", "[tool.condor]\nplugins = [\"enum.toml\"]\n"),
+            ("enum.toml", "[plugin]\nname = \"enum\"\n[[used]]\nnames = [\"nothing\"]\n"),
+            ("m.py", "from enum import Enum\nclass E(Enum):\n    A = 1\nprint(E)\n"),
+        ],
+    );
+    assert_eq!(condor(&dir, &["m.py"]).1, "m.py:3: unused variable 'A' (60% confidence)\n");
+}
+
+#[test]
+fn entry_points_use_their_module() {
+    let dir = project(
+        "entry_module",
+        &[
+            ("pyproject.toml", "[project.scripts]\ntool = \"pkg.cli:main\"\n"),
+            ("pkg/cli.py", "def main():\n    pass\n"),
+            ("pkg/other.py", "def main():\n    pass\n"),
+        ],
+    );
+    assert_eq!(condor(&dir, &["pkg"]).1, "pkg/other.py:1: unused function 'main' (60% confidence)\n");
+}
+
+#[test]
+fn coding_cookie_in_a_latin1_comment() {
+    let dir = project("cookie", &[]);
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("e.py"), b"# -*- coding: latin-1 -*- Soci\xe9t\xe9\nx = 1\n").unwrap();
+    assert_eq!(condor(&dir, &["e.py"]).0, 3);
+}
+
+/// The binary, for what only `main` sets up.
+fn binary(dir: &Path, args: &[&str]) -> std::process::Output {
+    std::process::Command::new(env!("CARGO_BIN_EXE_condor")).args(args).current_dir(dir).output().unwrap()
+}
+
+#[test]
+fn deeply_nested_code_is_analysed() {
+    let deep = format!("x = {}1{}\n", "(".repeat(5000), ")".repeat(5000));
+    let dir = project("deep", &[("deep.py", &deep), ("other.py", "y = 1\n")]);
+    assert_eq!(binary(&dir, &["."]).status.code(), Some(3));
+}
+
+#[test]
+fn subcommand_options_are_checked() {
+    let dir = project("subcommands", &[]);
+    std::fs::create_dir_all(&dir).unwrap();
+    assert_eq!(binary(&dir, &["server", "--bogus"]).status.code(), Some(2));
+    assert_eq!(binary(&dir, &["query", "missing.py"]).status.code(), Some(1));
+}
+
+#[cfg(unix)]
+#[test]
+fn missing_working_directory_is_an_error() {
+    let dir = project("gone", &[]);
+    std::fs::create_dir_all(&dir).unwrap();
+    // Enter a directory, remove it, then start condor there.
+    let script = format!("mkdir d && cd d && rmdir ../d && exec '{}' .", env!("CARGO_BIN_EXE_condor"));
+    let out = std::process::Command::new("sh").arg("-c").arg(script).current_dir(&dir).output().unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("current directory"));
+}

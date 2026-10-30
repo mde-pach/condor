@@ -26,13 +26,50 @@ use crate::run::{self, Output};
 
 type Result<T> = std::result::Result<T, Box<dyn Error + Send + Sync>>;
 
+/// The largest message accepted from the editor.
+const MAX_MESSAGE: usize = 64 << 20;
+
 /// `condor server`: serve the editor on stdin and stdout.
-pub fn main(argv: &[String]) -> i32 {
-    let (connection, io_threads) = Connection::stdio();
-    let result = serve(&connection, argv);
+pub fn main(argv: &[String], cwd: &Path) -> i32 {
+    // The options are the command line's: check them (and answer `--help`)
+    // before talking to an editor.
+    if let Err(exit) = args::parse(argv) {
+        print!("{}", exit.stdout);
+        eprint!("{}", exit.stderr);
+        return exit.code;
+    }
+    let (connection, Connection { sender: to_server, receiver: from_server }) = Connection::memory();
+    std::thread::spawn(move || {
+        let mut stdin = std::io::stdin().lock();
+        // Ends on end of input or a malformed message; the server then
+        // sees the connection close.
+        loop {
+            match read_message(&mut stdin) {
+                Ok(Some(message)) => {
+                    if to_server.send(message).is_err() {
+                        break;
+                    }
+                }
+                Ok(None) => break,
+                Err(e) => {
+                    eprintln!("condor server: {e}");
+                    break;
+                }
+            }
+        }
+    });
+    let writer = std::thread::spawn(move || {
+        let mut stdout = std::io::stdout().lock();
+        for message in from_server {
+            if message.write(&mut stdout).is_err() {
+                break;
+            }
+        }
+    });
+    let result = serve(&connection, argv, cwd);
     drop(connection);
-    let joined = io_threads.join();
-    match result.and(joined.map_err(Into::into)) {
+    let _ = writer.join();
+    match result {
         Ok(()) => 0,
         Err(e) => {
             eprintln!("condor server: {e}");
@@ -41,8 +78,41 @@ pub fn main(argv: &[String]) -> i32 {
     }
 }
 
-fn serve(connection: &Connection, argv: &[String]) -> Result<()> {
-    let (id, params) = connection.initialize_start()?;
+/// One message in LSP framing (`Content-Length` header, blank line, JSON
+/// body), refusing bodies over [`MAX_MESSAGE`]. `None` at end of input.
+fn read_message(input: &mut impl std::io::BufRead) -> std::io::Result<Option<Message>> {
+    let invalid = |msg: String| std::io::Error::new(std::io::ErrorKind::InvalidData, msg);
+    let mut length: Option<usize> = None;
+    loop {
+        let mut header = String::new();
+        if input.read_line(&mut header)? == 0 {
+            return Ok(None);
+        }
+        let header = header.trim_end();
+        if header.is_empty() {
+            break;
+        }
+        if let Some((name, value)) = header.split_once(':')
+            && name.eq_ignore_ascii_case("content-length") {
+                length = Some(value.trim().parse().map_err(|_| invalid(format!("bad header: {header}")))?);
+            }
+    }
+    let length = length.ok_or_else(|| invalid("missing Content-Length".into()))?;
+    if length > MAX_MESSAGE {
+        return Err(invalid(format!("message of {length} bytes is too large")));
+    }
+    let mut body = vec![0; length];
+    input.read_exact(&mut body)?;
+    serde_json::from_slice(&body).map(Some).map_err(|e| invalid(e.to_string()))
+}
+
+fn serve(connection: &Connection, argv: &[String], cwd: &Path) -> Result<()> {
+    let (id, params) = match connection.initialize_start() {
+        Ok(start) => start,
+        // The editor left before starting.
+        Err(e) if e.channel_is_disconnected() => return Ok(()),
+        Err(e) => return Err(e.into()),
+    };
     let init: InitializeParams = serde_json::from_value(params)?;
     #[allow(deprecated)] // root_uri: still sent by clients without workspace folders
     let uris: Vec<Uri> = match &init.workspace_folders {
@@ -51,7 +121,7 @@ fn serve(connection: &Connection, argv: &[String]) -> Result<()> {
     };
     let mut roots: Vec<PathBuf> = uris.iter().filter_map(uri_to_path).collect();
     if roots.is_empty() {
-        roots.push(std::env::current_dir()?);
+        roots.push(cwd.to_path_buf());
     }
     connection.initialize_finish(
         id,
@@ -256,11 +326,10 @@ impl Server {
     /// An analysed path as the editor knows it (below the workspace folder
     /// as opened, not its resolved form).
     fn shown(&self, path: &Path) -> PathBuf {
-        if let Some(folder) = self.owner(path).map(|i| &self.folders[i]) {
-            if let Ok(rel) = path.strip_prefix(&folder.real_root) {
+        if let Some(folder) = self.owner(path).map(|i| &self.folders[i])
+            && let Ok(rel) = path.strip_prefix(&folder.real_root) {
                 return folder.root.join(rel);
             }
-        }
         path.to_path_buf()
     }
 
@@ -349,6 +418,7 @@ impl Server {
             };
             let at = Position::new(line, at);
             let edit = TextEdit::new(Range::new(at, at), new_text);
+            #[allow(clippy::mutable_key_type)] // lsp-types keys edits by `Uri`
             let changes = HashMap::from([(params.text_document.uri.clone(), vec![edit])]);
             actions.push(CodeActionOrCommand::CodeAction(CodeAction {
                 title: format!("Ignore with `# noqa: {code}`"),

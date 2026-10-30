@@ -259,6 +259,9 @@ impl<'a> Scanner<'a> {
         confidence: u8,
         ignore: Ignore,
     ) -> Option<usize> {
+        if kind != ItemKind::UnreachableCode {
+            self.out.defined_names.push(name.to_string());
+        }
         let ignored = self.ignored_by(ignore, name)
             || self.opts.ignore_names.matches_case(name)
             || self.noqa.ignores(first_line, kind.noqa_code());
@@ -320,7 +323,9 @@ impl<'a> Scanner<'a> {
                         }
                     }
                 }
-                Decorator { name: self.resolve_name(name.trim_start_matches('@')), keywords }
+                let written = name.trim_start_matches('@');
+                let first = written.split('.').next().unwrap_or(written);
+                Decorator { name: self.resolve_name(written), keywords, imported: self.aliases.contains_key(first) }
             })
             .collect()
     }
@@ -424,7 +429,7 @@ impl<'a> Scanner<'a> {
                 let rest = &stmts[i + 1..];
                 // `raise NotImplementedError` followed by a bare `yield` is how
                 // an abstract method is made a generator.
-                if !rest.is_empty() && rest.iter().all(|s| is_bare_yield(*s)) {
+                if is_not_implemented(stmt) && !rest.is_empty() && rest.iter().all(|s| is_bare_yield(*s)) {
                     return false;
                 }
                 if let Some(&next) = stmts.get(i + 1) {
@@ -493,12 +498,11 @@ impl<'a> Scanner<'a> {
 
     fn reach_try(&mut self, stmt: &'a Stmt, body: &'a [Stmt], handlers: &'a [ExceptHandler], orelse: &'a [Stmt]) {
         let try_can = self.statements_can_fall_through(&Self::refs(body));
-        if !try_can {
-            if let (Some(first), Some(last)) = (orelse.first(), orelse.last()) {
+        if !try_can
+            && let (Some(first), Some(last)) = (orelse.first(), orelse.last()) {
                 let (f, l) = (self.stmt_first_line(StmtRef::Stmt(first)), self.end_line(last));
                 self.report_unreachable("else", f, l, "unreachable 'else' block".into());
             }
-        }
         // `any()` stops at the first handler that can fall through.
         let mut any_except = false;
         for ExceptHandler::ExceptHandler(h) in handlers {
@@ -526,10 +530,7 @@ impl<'a> Scanner<'a> {
     }
 
     fn visit_opt(&mut self, e: Option<&'a Expr>) {
-        match e {
-            Some(e) => self.visit_expr(e),
-            None => {}
-        }
+        if let Some(e) = e { self.visit_expr(e) }
     }
 
     fn visit_stmt(&mut self, stmt: &'a Stmt) {
@@ -766,6 +767,7 @@ impl<'a> Scanner<'a> {
         self.visit_opt(p.annotation.as_deref());
         let item = match self.skip_params {
             Some(SkipParams::Stub) => {
+                self.out.defined_names.push(p.name.to_string());
                 self.log(format!("Ignoring variable \"{}\" (stub parameter)", p.name));
                 None
             }
@@ -1042,47 +1044,42 @@ impl<'a> Scanner<'a> {
     /// `"%(my_var)s" % locals()`. vulture adds these with `|=`, which bypasses
     /// its verbose logging.
     fn handle_bin_op(&mut self, b: &ruff_python_ast::ExprBinOp) {
-        if let Expr::StringLiteral(s) = &*b.left {
-            if b.op == Operator::Mod && is_locals_call(&b.right) {
+        if let Expr::StringLiteral(s) = &*b.left
+            && b.op == Operator::Mod && is_locals_call(&b.right) {
                 for caps in PERCENT_FORMAT.captures_iter(s.value.to_str()) {
                     self.out.uses.push(caps[1].to_string());
                 }
             }
-        }
     }
 
     fn handle_call(&mut self, c: &ruff_python_ast::ExprCall) {
         let nargs = c.arguments.args.len();
         // Calls that name things a framework provides by name, such as
         // `@pytest.mark.usefixtures("db")` (from plugins).
-        if !self.opts.call_hints.is_empty() {
-            if let Some(callee) = dotted_name(&c.func) {
-                if self.opts.call_hints.matches_case(&self.resolve_name(&callee)) {
+        if !self.opts.call_hints.is_empty()
+            && let Some(callee) = dotted_name(&c.func)
+                && self.opts.call_hints.matches_case(&self.resolve_name(&callee)) {
                     for arg in &c.arguments.args {
                         if let Expr::StringLiteral(s) = arg {
                             self.out.requested.push(s.value.to_str().to_string());
                         }
                     }
                 }
-            }
-        }
         if let Expr::Name(n) = &*c.func {
             let id = n.id.as_str();
-            if (id == "getattr" && (2..=3).contains(&nargs)) || (id == "hasattr" && nargs == 2) {
-                if let Expr::StringLiteral(s) = &c.arguments.args[1] {
+            if ((id == "getattr" && (2..=3).contains(&nargs)) || (id == "hasattr" && nargs == 2))
+                && let Expr::StringLiteral(s) = &c.arguments.args[1] {
                     self.use_name(s.value.to_str());
                 }
-            }
         }
         // `"{my_var}".format(**locals())`.
-        if let Expr::Attribute(a) = &*c.func {
-            if let Expr::StringLiteral(s) = &*a.value {
+        if let Expr::Attribute(a) = &*c.func
+            && let Expr::StringLiteral(s) = &*a.value {
                 let has_locals = c.arguments.keywords.iter().any(|k| k.arg.is_none() && is_locals_call(&k.value));
                 if a.attr.as_str() == "format" && has_locals {
                     self.handle_new_format_string(s.value.to_str());
                 }
             }
-        }
     }
 
     /// Tag a name assigned directly in a class body, for the declarative
@@ -1133,14 +1130,20 @@ fn is_super_call(e: &Expr) -> bool {
 fn is_stub_body(body: &[Stmt]) -> bool {
     body.iter().all(|s| match s {
         Stmt::Expr(e) => matches!(&*e.value, Expr::StringLiteral(_) | Expr::EllipsisLiteral(_)),
-        Stmt::Raise(r) => r.exc.as_deref().is_some_and(|e| {
-            let e = match e {
-                Expr::Call(c) => &*c.func,
-                other => other,
-            };
-            matches!(e, Expr::Name(n) if n.id.as_str() == "NotImplementedError")
-        }),
+        Stmt::Raise(_) => is_not_implemented(StmtRef::Stmt(s)),
         _ => false,
+    })
+}
+
+/// `raise NotImplementedError` or `raise NotImplementedError(...)`.
+fn is_not_implemented(s: StmtRef) -> bool {
+    let StmtRef::Stmt(Stmt::Raise(r)) = s else { return false };
+    r.exc.as_deref().is_some_and(|e| {
+        let e = match e {
+            Expr::Call(c) => &*c.func,
+            other => other,
+        };
+        matches!(e, Expr::Name(n) if n.id.as_str() == "NotImplementedError")
     })
 }
 

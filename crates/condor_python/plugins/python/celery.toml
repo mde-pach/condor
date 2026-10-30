@@ -4,4 +4,4 @@ description = "Tasks are run by workers, often scheduled by name."
 when_imported = ["celery"]
 
 [[used]]
-decorated_by = ["celery.shared_task", "*.task"]
+decorated_by = ["celery.shared_task", "celery.app.shared_task", "*.task"]

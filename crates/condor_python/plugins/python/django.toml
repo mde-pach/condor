@@ -23,15 +23,23 @@ in_classes_inheriting = ["django.db.models.Model"]
 names = ["save", "delete", "clean", "get_absolute_url"]
 
 [[used]]
-in_classes_inheriting = ["django.views.generic.View", "django.views.View"]
-names = ["get", "post", "put", "patch", "delete", "head", "options", "dispatch", "setup", "get_queryset", "get_object", "get_context_data", "get_success_url", "form_valid", "form_invalid"]
+in_classes_inheriting = ["django.views.View", "django.views.generic.*"]
+names = ["get", "post", "put", "patch", "delete", "head", "options", "dispatch", "setup", "get_queryset", "get_object", "get_context_data", "get_success_url", "form_valid", "form_invalid",
+    "get_form", "get_form_class", "get_form_kwargs", "get_initial", "get_template_names", "get_paginate_by", "get_ordering"]
+
+# Generic views read these class attributes.
+[[fields_used]]
+inherits = ["django.views.View", "django.views.generic.*"]
+fields = "assigned"
+
+# Management commands, imported from django.core.management or its base
+# module (BaseCommand, AppCommand, LabelCommand).
+[[used]]
+in_classes_inheriting = ["django.core.management.*Command"]
+names = ["handle", "handle_app_config", "handle_label", "add_arguments"]
 
 [[used]]
-in_classes_inheriting = ["django.core.management.base.BaseCommand"]
-names = ["handle", "add_arguments"]
-
-[[used]]
-inherits = ["django.core.management.base.BaseCommand"]
+inherits = ["django.core.management.*Command"]
 
 [[used]]
 in_classes_inheriting = ["django.apps.AppConfig"]

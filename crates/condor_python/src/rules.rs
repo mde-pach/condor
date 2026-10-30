@@ -73,7 +73,24 @@ pub fn collect_imports(body: &[Stmt]) -> (FxHashMap<String, String>, Vec<String>
                         };
                     }
                 }
-                Stmt::ImportFrom(i) if i.level == 0 => {
+                // Relative imports keep their dots (`.models.Base`), so they
+                // can be told apart from top-level modules and resolved to a
+                // project file.
+                Stmt::ImportFrom(i) if i.level > 0 => {
+                    let dots = ".".repeat(i.level as usize);
+                    let prefix = match &i.module {
+                        Some(module) => format!("{dots}{module}."),
+                        None => dots,
+                    };
+                    for a in &i.names {
+                        if a.name.as_str() == "*" {
+                            continue;
+                        }
+                        let local = a.asname.as_ref().unwrap_or(&a.name);
+                        self.aliases.insert(local.to_string(), format!("{prefix}{}", a.name));
+                    }
+                }
+                Stmt::ImportFrom(i) => {
                     let Some(module) = &i.module else { return };
                     self.modules.push(module.split('.').next().unwrap_or(module).to_string());
                     for a in &i.names {

@@ -5,70 +5,158 @@
   "description": "Declarative rules that tell condor which definitions a library uses. The same schema applies to TOML and JSON files.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["plugin"],
+  "required": [
+    "plugin"
+  ],
   "$defs": {
     "names": {
       "type": "array",
-      "items": { "type": "string" },
-      "description": "Dotted names as imported (pydantic.BaseModel), with glob wildcards (*, ?, [abc])."
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "minItems": 1,
+      "description": "Dotted names as imported (pydantic.BaseModel), with glob wildcards (*, ?, [abc]). Give at least one; leave the key out to select nothing."
     }
   },
   "properties": {
     "plugin": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["name"],
+      "required": [
+        "name"
+      ],
       "properties": {
-        "name": { "type": "string" },
-        "description": { "type": "string" },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "\\S"
+        },
+        "description": {
+          "type": "string"
+        },
         "when_imported": {
           "type": "array",
-          "items": { "type": "string" },
-          "description": "Top-level module names; the plugin applies when the project imports one. Empty or absent: always."
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "pattern": "^[^.\\s]+$"
+          },
+          "description": "Top-level module names (no dots); the plugin applies when the project imports one. Absent: always."
         }
       }
     },
     "used": {
       "type": "array",
-      "description": "Definitions that are used: functions, methods and classes matching every selector given.",
+      "description": "Definitions that are used: functions, methods and classes matching every selector given (all must match).",
       "items": {
         "type": "object",
         "additionalProperties": false,
         "properties": {
-          "decorated_by": { "$ref": "#/$defs/names" },
-          "names": { "$ref": "#/$defs/names" },
-          "in_classes_inheriting": { "$ref": "#/$defs/names", "description": "Select methods of classes inheriting from these." },
-          "inherits": { "$ref": "#/$defs/names", "description": "Select classes inheriting from these." }
+          "decorated_by": {
+            "$ref": "#/$defs/names"
+          },
+          "names": {
+            "$ref": "#/$defs/names"
+          },
+          "in_classes_inheriting": {
+            "$ref": "#/$defs/names",
+            "description": "Select methods of classes inheriting from these, directly or through other project classes."
+          },
+          "in_classes_based_on": {
+            "$ref": "#/$defs/names",
+            "description": "Select methods of classes listing one of these among their own bases (not their subclasses)."
+          },
+          "inherits": {
+            "$ref": "#/$defs/names",
+            "description": "Select classes inheriting from these."
+          }
         },
         "minProperties": 1,
-        "not": { "required": ["in_classes_inheriting", "inherits"] }
+        "not": {
+          "required": [
+            "inherits"
+          ],
+          "anyOf": [
+            {
+              "required": [
+                "in_classes_inheriting"
+              ]
+            },
+            {
+              "required": [
+                "in_classes_based_on"
+              ]
+            }
+          ]
+        }
       }
     },
     "fields_used": {
       "type": "array",
-      "description": "Attributes of matching classes, and of their subclasses, that are used.",
+      "description": "Attributes of matching classes, and of their subclasses, that are used. A class matches if any selector given matches it.",
       "items": {
         "type": "object",
         "additionalProperties": false,
         "properties": {
-          "decorated_by": { "$ref": "#/$defs/names" },
-          "inherits": { "$ref": "#/$defs/names" },
-          "names": { "$ref": "#/$defs/names", "description": "Class names." },
-          "fields": { "enum": ["annotated", "assigned", "all"], "default": "annotated" }
+          "decorated_by": {
+            "$ref": "#/$defs/names"
+          },
+          "inherits": {
+            "$ref": "#/$defs/names"
+          },
+          "names": {
+            "$ref": "#/$defs/names",
+            "description": "Class names."
+          },
+          "fields": {
+            "enum": [
+              "annotated",
+              "assigned",
+              "all"
+            ],
+            "default": "annotated"
+          }
         },
-        "anyOf": [{ "required": ["decorated_by"] }, { "required": ["inherits"] }, { "required": ["names"] }]
+        "anyOf": [
+          {
+            "required": [
+              "decorated_by"
+            ]
+          },
+          {
+            "required": [
+              "inherits"
+            ]
+          },
+          {
+            "required": [
+              "names"
+            ]
+          }
+        ]
       }
     },
     "parameters_used": {
       "type": "array",
-      "description": "Functions whose parameters are not reported because their signature is imposed.",
+      "description": "Functions whose parameters are not reported because their signature is imposed. Every selector given must match.",
       "items": {
         "type": "object",
         "additionalProperties": false,
         "properties": {
-          "decorated_by": { "$ref": "#/$defs/names" },
-          "names": { "$ref": "#/$defs/names" },
-          "in_classes_inheriting": { "$ref": "#/$defs/names" }
+          "decorated_by": {
+            "$ref": "#/$defs/names"
+          },
+          "names": {
+            "$ref": "#/$defs/names"
+          },
+          "in_classes_inheriting": {
+            "$ref": "#/$defs/names"
+          },
+          "in_classes_based_on": {
+            "$ref": "#/$defs/names",
+            "description": "Methods of classes listing one of these among their own bases."
+          }
         },
         "minProperties": 1
       }
@@ -79,28 +167,71 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["providers"],
+        "required": [
+          "providers"
+        ],
         "properties": {
           "providers": {
             "type": "object",
             "additionalProperties": false,
             "properties": {
-              "decorated_by": { "$ref": "#/$defs/names" },
-              "names": { "$ref": "#/$defs/names" }
+              "decorated_by": {
+                "$ref": "#/$defs/names"
+              },
+              "names": {
+                "$ref": "#/$defs/names"
+              }
             },
             "minProperties": 1
           },
-          "name_keyword": { "type": "string", "description": "Decorator keyword that renames the provider." },
-          "always_used_keyword": { "type": "string", "description": "Decorator keyword that makes the provider always used when true." },
+          "name_keyword": {
+            "type": "string",
+            "description": "Decorator keyword that renames the provider.",
+            "minLength": 1
+          },
+          "always_used_keyword": {
+            "type": "string",
+            "description": "Decorator keyword that makes the provider always used when true.",
+            "minLength": 1
+          },
           "consumers": {
             "type": "object",
             "additionalProperties": false,
             "properties": {
-              "names": { "$ref": "#/$defs/names", "description": "Function names." },
-              "files": { "type": "array", "items": { "type": "string" }, "description": "File patterns; with a /, matched against the path." }
+              "names": {
+                "$ref": "#/$defs/names",
+                "description": "Function names."
+              },
+              "files": {
+                "$ref": "#/$defs/names",
+                "description": "File patterns; with a /, matched against the path."
+              }
             }
           },
-          "requested_by_calls": { "$ref": "#/$defs/names", "description": "Calls whose string arguments request providers." }
+          "requested_by_calls": {
+            "$ref": "#/$defs/names",
+            "description": "Calls whose string arguments request providers."
+          }
+        }
+      }
+    },
+    "$schema": {
+      "type": "string",
+      "description": "The schema for editor support (JSON plugins)."
+    },
+    "variables_used": {
+      "type": "array",
+      "description": "Module and class variables a framework reads by name (pytestmark). They apply in files that import a when_imported module.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "names"
+        ],
+        "properties": {
+          "names": {
+            "$ref": "#/$defs/names"
+          }
         }
       }
     }

@@ -273,3 +273,91 @@ fn framework_entry_points() {
     ];
     assert_eq!(names(&files), vec!["helper".to_string()]);
 }
+
+// ----- regressions found by the 0.2.0 audit --------------------------------
+
+#[test]
+fn whitelist_entries_for_names_still_defined_are_not_stale() {
+    let app = "from enum import Enum\nclass Color(Enum):\n    RED = 1\ndef handler(event):\n    \"\"\"cb\"\"\"\nimport os  # noqa\nprint(Color, handler)\n";
+    let whitelist = "RED  # unused variable (app.py:3)\nevent  # unused variable (app.py:4)\nos  # unused import (app.py:6)\ngone  # unused function (app.py:7)\n";
+    assert_eq!(names(&[("app.py", app), ("whitelist.py", whitelist)]), ["gone"]);
+}
+
+#[test]
+fn plugins_tell_same_named_classes_apart() {
+    let model = "from enum import Enum\nclass Status(Enum):\n    OK = 1\n";
+    let other = "class Status:\n    DEAD_CONSTANT = 5\n    def __init__(self): pass\nStatus()\n";
+    assert_eq!(names(&[("a.py", model), ("b.py", other)]), ["DEAD_CONSTANT"]);
+    // A base imported from a project module resolves to that module's class.
+    let models = "import pydantic as pd\nclass Base(pd.BaseModel):\n    x: int\n";
+    let user = "from pkg.models import Base\nclass User(Base):\n    name: int\n";
+    let unrelated = "class Base:\n    pass\nclass NotModel(Base):\n    should_report: int\nNotModel()\n";
+    let found = names(&[("pkg/models.py", models), ("pkg/user.py", user), ("other/collide.py", unrelated)]);
+    assert_eq!(found, ["should_report", "User"]);
+}
+
+#[test]
+fn relative_bases_resolve() {
+    let base = "from pydantic import BaseModel\nclass Base(BaseModel):\n    pass\n";
+    let model = "from .base import Base\nclass Item(Base):\n    price: int\nItem()\n";
+    assert_eq!(names(&[("pkg/base.py", base), ("pkg/item.py", model)]), Vec::<String>::new());
+}
+
+#[test]
+fn decorator_patterns_apply_where_the_framework_is_used() {
+    let web = "import flask\napp = flask.Flask(__name__)\n@app.route('/')\ndef index(): pass\n";
+    let util = "class R:\n    def delete(self, f): return f\nregistry = R()\n@registry.delete\ndef dead_handler(): pass\n";
+    let views = "from web import app\n@app.get('/x')\ndef imported_app_view(): pass\n";
+    assert_eq!(names(&[("web.py", web), ("util.py", util), ("views.py", views)]), ["dead_handler"]);
+}
+
+#[test]
+fn only_not_implemented_makes_a_generator_stub() {
+    let code = "def empty():\n    return\n    yield\n\ndef stub():\n    raise NotImplementedError\n    yield\nprint(empty, stub)\n";
+    assert_eq!(findings(&[("g.py", code)]), vec![("unreachable_code".into(), "return".into(), 3, 100)]);
+}
+
+#[test]
+fn protocol_implementations_are_not_protocols() {
+    let code = "from typing import Protocol\nclass Reader(Protocol):\n    def read(self, n): ...\nclass FileReader(Reader):\n    def seek(self, offset):\n        return 0\nFileReader().seek(1)\nprint(Reader.read)\n";
+    assert_eq!(names(&[("a.py", code)]), ["offset"]);
+}
+
+#[test]
+fn framework_variables_and_validator_parameters() {
+    let test = "import pytest\npytestmark = pytest.mark.usefixtures('db')\nunused = 1\ndef test_a():\n    pass\n";
+    let model = "from pydantic import BaseModel, field_validator\nclass M(BaseModel):\n    x: int\n    @field_validator('x')\n    @classmethod\n    def check(cls, value):\n        return value\nprint(M)\n";
+    assert_eq!(names(&[("test_a.py", test), ("m.py", model)]), ["unused"]);
+}
+
+#[test]
+fn plugin_validation() {
+    use condor_python::plugins::parse;
+    let ok = |p: &str, s: &str| parse(p, s).map(|_| ()).map_err(|e| e.to_string());
+    assert!(ok("p.json", r#"{"$schema": "x", "plugin": {"name": "p"}, "used": [{"names": ["f"]}]}"#).is_ok());
+    assert!(ok("p.toml", "[plugin]\nname = \"p\"\n[[used]]\nnames = []\n").unwrap_err().contains("empty list"));
+    assert!(ok("p.toml", "[plugin]\nname = \"p\"\nwhen_imported = [\"a.b\"]\n").unwrap_err().contains("top-level"));
+    assert!(ok("p.toml", "[plugin]\nname = \"\"\n").unwrap_err().contains("name"));
+    assert!(ok("p.toml", "[plugin]\nname = \"p\"\n[[used]]\nnames = [\"[f\"]\n").unwrap_err().contains("unclosed"));
+    assert!(ok("p.json", "[]").unwrap_err().contains("JSON object"));
+    assert!(ok("p.yaml", "").unwrap_err().contains(".toml or .json"));
+    let null = r#"{"plugin": {"name": "p"}, "injected_by_name": [{"providers": {"names": ["f"]}, "name_keyword": null}]}"#;
+    assert!(ok("p.json", null).is_err());
+}
+
+#[test]
+fn deep_class_hierarchies() {
+    // Defined child first, so following bases goes deep.
+    let mut code = String::new();
+    for i in (1..20_000).rev() {
+        code.push_str(&format!("class C{i}(C{}):\n    f{i}: int\n", i - 1));
+    }
+    code.push_str("import pydantic\nclass C0(pydantic.BaseModel):\n    pass\n");
+    let found = std::thread::Builder::new()
+        .stack_size(1 << 20)
+        .spawn(move || names(&[("m.py", &code)]))
+        .unwrap()
+        .join()
+        .unwrap();
+    assert!(found.iter().all(|n| n.starts_with('C')), "fields are used");
+}

@@ -67,10 +67,18 @@ entry such as `name  # unused function (pkg/a.py:4)` is reported when
 `pkg/a.py` was scanned but no longer defines `name`, as
 `stale whitelist entry 'name': pkg/a.py no longer defines it` (V301, 100%
 confidence). Its use no longer counts, so it cannot hide new dead code with
-the same name elsewhere. (vulture #430)
+the same name elsewhere. A name the file still defines is not stale, even
+when it is no longer reported (`# noqa`, `--ignore-names`, framework fields).
+Entry paths are resolved against the working directory or the whitelist's
+directory. (vulture #430)
+
+**I4 detail.** An entry point `pkg.cli:main` uses `main` in `pkg/cli.py`;
+only when that file is not scanned does it use every `main`.
 
 **Framework entry points** (plugins `django`, `celery`, `flask`, `fastapi`,
-`click`). Django model, view, command and app hooks, template filters and
+`click`). Decorator patterns such as `*.get` and class names such as `Meta`
+apply in files that import the framework, or to decorators whose object is
+imported (`from myapp import app` then `@app.route`). Django model, view, command and app hooks, template filters and
 tags, and signal receivers; Celery tasks; Flask views, hooks, error handlers
 and template helpers; FastAPI path operations, event handlers, middleware and
 exception handlers; click commands and groups are used.
@@ -79,7 +87,11 @@ exception handlers; click commands and groups are used.
 
 **I8. Output formats.** `--format json` prints one object per finding (path,
 line, end line, kind, code, name, message, confidence, size). `--format sarif`
-prints a SARIF 2.1.0 log for code-scanning tools. (vulture #405)
+prints a SARIF 2.1.0 log for code-scanning tools: paths are URIs relative to
+`%SRCROOT%` (the working directory), and files that could not be analysed are
+listed as tool execution notifications. In both formats, log lines (`-v`) go
+to stderr, so stdout is only the report; `--make-whitelist` cannot be
+combined with them. (vulture #405)
 
 **I9. `.gitignore`.** When a directory is scanned, paths ignored by
 `.gitignore`, `.git/info/exclude` and `.ignore` files are skipped (virtual
@@ -89,16 +101,20 @@ environments, build output). Files given explicitly are always scanned.
 **I10. Scan without reporting.** `--no-report PATTERNS` (`no_report` in the
 configuration) scans the matching files, so the names they use count, but does
 not report their own findings. `--exclude` still drops files entirely.
-(vulture #434)
+Patterns follow `--exclude`: one without wildcards matches anywhere in the
+path (`tests`), one with wildcards must match the whole absolute path
+(`*/tests/*`, not `tests/*`). (vulture #434)
 
 **I11. Kinds.** `--only KINDS` (`only` in the configuration) reports only the
 given kinds: `attribute`, `class`, `function`, `import`, `method`, `property`,
-`variable`, `unreachable_code`, `whitelist_entry`, or their codes (`V103`).
-(vulture #303)
+`variable`, `unreachable_code`, `whitelist_entry`, or their codes (`V103`),
+in any case. (vulture #303)
 
 ## Configuration
 
 condor reads `[tool.vulture]`, then `[tool.condor]`, whose keys take
-precedence. The new keys (`no_report`, `only`, `format`) are accepted in both;
-put them in `[tool.condor]` if vulture also reads the file, since vulture
-rejects unknown keys.
+precedence. The new keys (`no_report`, `only`, `format`, `plugins`) are
+accepted in both; put them in `[tool.condor]` if vulture also reads the file,
+since vulture rejects unknown keys. `plugins` paths are relative to the
+configuration file. `--config` naming a missing file is an error (vulture
+ignores it).

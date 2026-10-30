@@ -27,6 +27,11 @@ pub const DEAD_CODE: i32 = 3;
 pub struct Output {
     pub stdout: Vec<u8>,
     pub stderr: Vec<u8>,
+    /// Log lines vulture prints on stdout go to stderr, so that stdout only
+    /// holds the report (JSON and SARIF).
+    pub logs_to_stderr: bool,
+    /// Errors about files that could not be analysed.
+    pub errors: Vec<String>,
 }
 
 impl Output {
@@ -39,9 +44,24 @@ impl Output {
         buf.push(b'\n');
     }
 
+    /// A log line (verbose output, configuration banner).
+    pub fn log(&mut self, stream: Stream, text: &str) {
+        let stream = if self.logs_to_stderr { Stream::Stderr } else { stream };
+        self.line(stream, text);
+    }
+
+    /// An error about an input file.
+    pub fn error(&mut self, text: &str) {
+        self.errors.push(text.to_string());
+        self.line(Stream::Stderr, text);
+    }
+
     fn scan_log(&mut self, scan: &FileScan) {
         for (stream, text) in &scan.log {
-            self.line(*stream, text);
+            match stream {
+                Stream::Stderr => self.error(text),
+                Stream::Stdout => self.log(*stream, text),
+            }
         }
     }
 }
@@ -56,6 +76,7 @@ pub fn exclude_patterns(exclude: &[String]) -> PatternSet {
 }
 
 /// What one module contributes.
+#[allow(clippy::large_enum_variant)] // nearly every module is `Scanned`
 pub enum ModuleResult {
     Excluded,
     Scanned(FileScan),
@@ -101,7 +122,7 @@ pub fn add_module(
     let shown = module.display();
     if opts.verbose {
         let verb = if matches!(result, ModuleResult::Excluded) { "Excluded" } else { "Scanning" };
-        out.line(Stream::Stdout, &format!("{verb}: {shown}"));
+        out.log(Stream::Stdout, &format!("{verb}: {shown}"));
     }
     match result {
         ModuleResult::Excluded => {}
@@ -110,14 +131,11 @@ pub fn add_module(
             analysis.push(scan.clone());
         }
         ModuleResult::Unreadable => {
-            out.line(
-                Stream::Stderr,
-                &format!("Error: Could not read file {shown} - \nTry to change the encoding to UTF-8."),
-            );
+            out.error(&format!("Error: Could not read file {shown} - \nTry to change the encoding to UTF-8."));
             analysis.push(FileScan { invalid_input: true, ..FileScan::default() });
         }
         ModuleResult::Crash(err) => {
-            out.line(Stream::Stderr, &format!("Error: {shown}: {err}"));
+            out.error(&format!("Error: {shown}: {err}"));
             return Err(INVALID_INPUT);
         }
     }
@@ -156,13 +174,13 @@ pub fn add_whitelists(
     for (path, source) in lang.implicit_sources(analysis) {
         if exclude.matches_normcase(&path) {
             if opts.verbose {
-                out.line(Stream::Stdout, &format!("Excluded whitelist: {path}"));
+                out.log(Stream::Stdout, &format!("Excluded whitelist: {path}"));
             }
             continue;
         }
         let Some(source) = source else { continue };
         if opts.verbose {
-            out.line(Stream::Stdout, &format!("Included whitelist: {path}"));
+            out.log(Stream::Stdout, &format!("Included whitelist: {path}"));
         }
         let scan = scan(&path, source);
         out.scan_log(&scan);
@@ -173,8 +191,20 @@ pub fn add_whitelists(
 /// Once every file is scanned: entry points, the language's project-wide
 /// rules, and stale whitelist entries.
 pub fn finish(lang: &Python, analysis: &mut Analysis, config: &Config, cwd: &Path) {
-    if !config.entry_point_names.is_empty() {
-        analysis.push(FileScan { uses: config.entry_point_names.clone(), ..FileScan::default() });
+    // An entry point uses its object in its module's file; if that file is
+    // not scanned, any definition with its names.
+    for entry in &config.entry_points {
+        let mut found = false;
+        for scan in &mut analysis.scans {
+            let Some(file) = scan.file.as_deref() else { continue };
+            if condor_core::paths::module_names(file).contains(&entry.module) {
+                found = true;
+                scan.items.retain(|i| !entry.path.contains(&i.name));
+            }
+        }
+        if !found {
+            analysis.push(FileScan { uses: entry.path.clone(), ..FileScan::default() });
+        }
     }
     lang.link(analysis);
     analysis.check_whitelist_entries(cwd);
@@ -213,7 +243,10 @@ pub fn report_where(
     let items: Vec<&Item> = select(analysis, config, cwd).into_iter().filter(|i| keep(i)).collect();
     match config.format.as_str() {
         "json" => out.line(Stream::Stdout, &crate::output::json(&items, cwd)),
-        "sarif" => out.line(Stream::Stdout, &crate::output::sarif(&items, cwd)),
+        "sarif" => {
+            let log = crate::output::sarif(&items, cwd, &out.errors);
+            out.line(Stream::Stdout, &log);
+        }
         _ => {
             for item in &items {
                 let line = if config.make_whitelist {
@@ -235,21 +268,32 @@ pub fn report_where(
 }
 
 /// The project's plugin files (`plugins` in the configuration: files, or
-/// directories of `.toml` and `.json` files, relative to the current
-/// directory).
+/// directories searched for `.toml` and `.json` files; relative to the
+/// configuration file, or the current directory).
 pub fn plugin_files(config: &Config, cwd: &Path) -> Result<Vec<PathBuf>, String> {
+    fn walk(dir: &Path, entry: &str, out: &mut Vec<PathBuf>) -> Result<(), String> {
+        let mut entries: Vec<PathBuf> = std::fs::read_dir(dir)
+            .map_err(|e| format!("Error: cannot read plugin directory {entry}: {e}"))?
+            .flatten()
+            .map(|e| e.path())
+            .collect();
+        entries.sort();
+        for path in entries {
+            if path.is_dir() {
+                walk(&path, entry, out)?;
+            } else if condor_python::plugins::format_of(&path).is_some()
+                && path.file_name().is_some_and(|n| n != "schema.json")
+            {
+                out.push(path);
+            }
+        }
+        Ok(())
+    }
     let mut files = Vec::new();
     for entry in &config.plugins {
         let path = cwd.join(entry);
         if path.is_dir() {
-            let mut entries: Vec<PathBuf> = std::fs::read_dir(&path)
-                .map_err(|e| format!("Error: cannot read plugin directory {entry}: {e}"))?
-                .flatten()
-                .map(|e| e.path())
-                .filter(|p| p.extension().is_some_and(|e| e == "toml" || e == "json"))
-                .collect();
-            entries.sort();
-            files.extend(entries);
+            walk(&path, entry, &mut files)?;
         } else {
             files.push(path);
         }
@@ -257,14 +301,22 @@ pub fn plugin_files(config: &Config, cwd: &Path) -> Result<Vec<PathBuf>, String>
     Ok(files)
 }
 
-/// The Python front end with the bundled plugins and the project's own.
+/// The Python front end with the bundled plugins and the project's own. A
+/// project plugin with the name of a bundled one replaces it.
 pub fn load_python(config: &Config, cwd: &Path) -> Result<Python, String> {
     let mut python = Python::bundled();
+    let mut own: Vec<String> = Vec::new();
     for file in plugin_files(config, cwd)? {
         let content = std::fs::read_to_string(&file)
             .map_err(|e| format!("Error: cannot read plugin {}: {e}", file.display()))?;
         let plugin = condor_python::plugins::parse(&file.to_string_lossy(), &content)
             .map_err(|e| format!("Error: invalid plugin {e}"))?;
+        let name = plugin.plugin.name.clone();
+        if own.contains(&name) {
+            return Err(format!("Error: two plugins are named \"{name}\" ({})", file.display()));
+        }
+        python.plugins.retain(|p| p.plugin.name != name);
+        own.push(name);
         python.plugins.push(plugin);
     }
     Ok(python)
@@ -297,8 +349,9 @@ pub fn run(argv: &[String], cwd: &Path, out: &mut Output) -> i32 {
         }
         Outcome::Exit(exit) => return emit(exit, out),
     };
+    out.logs_to_stderr = config.format != "text";
     if let Some(b) = banner {
-        out.line(Stream::Stdout, &b);
+        out.log(Stream::Stdout, &b);
     }
     let modules = match discover::get_modules(&config.paths, cwd) {
         Ok(m) => m,
@@ -330,14 +383,33 @@ pub fn emit(exit: Exit, out: &mut Output) -> i32 {
     exit.code
 }
 
+/// Stack size of the threads that parse and scan files. Parsing recurses
+/// on nesting, and the default 2 MiB overflows (aborting the process) on
+/// code nested a few thousand levels deep; the memory is only reserved.
+const SCAN_STACK: usize = 512 << 20;
+
 /// Entry point of the binary.
 pub fn main() -> i32 {
+    let _ = rayon::ThreadPoolBuilder::new().stack_size(SCAN_STACK).build_global();
     let argv: Vec<String> = std::env::args_os().skip(1).map(|a| a.to_string_lossy().into_owned()).collect();
-    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    // Without a working directory, relative paths have no meaning: vulture
+    // fails here too (and "." must never become "/").
+    let cwd = match std::env::current_dir() {
+        Ok(cwd) => cwd,
+        Err(e) => {
+            eprintln!("Error: cannot determine the current directory: {e}");
+            return INVALID_INPUT;
+        }
+    };
     let mut out = Output::default();
     // Commands come first; scan a directory with one of these names as `./server`.
     let code = match argv.first().map(String::as_str) {
-        Some("server") => return crate::server::main(&argv[1..]),
+        Some("server") => return crate::server::main(&argv[1..], &cwd),
+        #[cfg(unix)]
+        Some("daemon") if argv.len() > 1 => {
+            eprintln!("Error: condor daemon takes no arguments; condor query starts it");
+            return INVALID_CMDLINE;
+        }
         #[cfg(unix)]
         Some("daemon") => return crate::daemon::main(&cwd),
         Some("query") => crate::query::main(&argv[1..], &cwd, &mut out),

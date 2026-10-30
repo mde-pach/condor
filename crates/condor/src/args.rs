@@ -17,6 +17,8 @@ pub struct CliArgs {
     pub min_confidence: Option<i64>,
     pub sort_by_size: Option<bool>,
     pub config: String,
+    /// `--config` was given (a missing file is then an error).
+    pub config_given: bool,
     pub verbose: Option<bool>,
     pub format: Option<String>,
     pub no_report: Option<Vec<String>>,
@@ -146,11 +148,10 @@ fn parse_optional(arg: &str) -> Option<Vec<OptionTuple>> {
     if arg.chars().count() == 1 {
         return None;
     }
-    if let Some((opt, explicit)) = arg.split_once('=') {
-        if let Some(a) = lookup(opt) {
+    if let Some((opt, explicit)) = arg.split_once('=')
+        && let Some(a) = lookup(opt) {
             return Some(vec![tuple(Some(a), opt, Some("="), Some(explicit))]);
         }
-    }
     let tuples = option_tuples(arg);
     if !tuples.is_empty() {
         return Some(tuples);
@@ -264,11 +265,10 @@ pub fn parse(argv: &[String]) -> Result<CliArgs, Exit> {
         }
         let count = pattern[start..].iter().take_while(|&&c| c == 'A' || c == '-').count();
         let mut args: Vec<String> = argv[start..start + count].to_vec();
-        if pattern[start..start + count].contains(&'-') {
-            if let Some(pos) = args.iter().position(|a| a == "--") {
+        if pattern[start..start + count].contains(&'-')
+            && let Some(pos) = args.iter().position(|a| a == "--") {
                 args.remove(pos);
             }
-        }
         *pending = false;
         // An empty match leaves the default (the config file's paths).
         if !args.is_empty() {
@@ -329,7 +329,7 @@ fn consume_optional(
             let single_dash = option_string.chars().nth(1) != Some('-');
             if !act.takes_value() && single_dash && !explicit.is_empty() {
                 if sep.as_deref().is_some_and(|s| !s.is_empty()) || explicit.starts_with('-') {
-                    return Err(action_error(act, &format!("ignored explicit argument {}", format!("'{explicit}'"))));
+                    return Err(action_error(act, &format!("ignored explicit argument '{explicit}'")));
                 }
                 taken.push((act, Vec::new()));
                 let first: String = explicit.chars().take(1).collect();
@@ -358,7 +358,7 @@ fn consume_optional(
                 stop = start + 1;
                 break;
             } else {
-                return Err(action_error(act, &format!("ignored explicit argument {}", format!("'{explicit}'"))));
+                return Err(action_error(act, &format!("ignored explicit argument '{explicit}'")));
             }
         }
         let next = start + 1;
@@ -393,14 +393,17 @@ fn apply(act: Action, values: Vec<String>, out: &mut CliArgs) -> Result<(), Exit
         Action::MakeWhitelist => out.make_whitelist = Some(true),
         Action::SortBySize => out.sort_by_size = Some(true),
         Action::Verbose => out.verbose = Some(true),
-        Action::Config => out.config = values[0].clone(),
+        Action::Config => {
+            out.config = values[0].clone();
+            out.config_given = true;
+        }
         Action::Format => out.format = Some(values[0].clone()),
         Action::NoReport => out.no_report = Some(csv(&values[0])),
         Action::Only => out.only = Some(csv(&values[0])),
         Action::MinConfidence => match py_int(&values[0]) {
             Some(n) => out.min_confidence = Some(n),
             None => {
-                return Err(action_error(act, &format!("invalid int value: {}", format!("'{}'", values[0]))));
+                return Err(action_error(act, &format!("invalid int value: '{}'", values[0])));
             }
         },
     }

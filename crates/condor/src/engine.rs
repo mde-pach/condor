@@ -144,11 +144,10 @@ impl Engine {
             })
             .collect();
         for (module, now, result) in fresh {
-            if let ModuleResult::Scanned(scan) = &result {
-                if !scan.invalid_input {
+            if let ModuleResult::Scanned(scan) = &result
+                && !scan.invalid_input {
                     self.parsed.insert(module.clone(), scan.clone());
                 }
-            }
             self.scans.insert(module, (now, result));
         }
         if self.scans.len() > self.modules.len() {
@@ -169,14 +168,12 @@ impl Engine {
         let mut analysis = Analysis::default();
         for module in &self.modules {
             let (_, result) = &self.scans[module];
-            if !strict {
-                if let ModuleResult::Scanned(scan) = result {
-                    if scan.invalid_input {
+            if !strict
+                && let ModuleResult::Scanned(scan) = result
+                    && scan.invalid_input {
                         analysis.push(self.parsed.get(module).unwrap_or(scan).clone());
                         continue;
                     }
-                }
-            }
             match run::add_module(module, result, &self.opts, &mut analysis, out) {
                 Err(code) if strict => return Err(code),
                 _ => {}

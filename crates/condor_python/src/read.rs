@@ -4,10 +4,11 @@
 use std::sync::LazyLock;
 
 use regex::bytes::Regex as BytesRegex;
-use regex::Regex;
 
-static COOKIE_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"^[ \t\x0c]*#.*?coding[:=][ \t]*([-\w.]+)").unwrap());
+// On bytes, as in Python 3.14: a comment that is not UTF-8 can still
+// declare its encoding.
+static COOKIE_RE: LazyLock<BytesRegex> =
+    LazyLock::new(|| BytesRegex::new(r"(?-u)^[ \t\x0c]*#.*?coding[:=][ \t]*([-\w.]+)").unwrap());
 static BLANK_RE: LazyLock<BytesRegex> =
     LazyLock::new(|| BytesRegex::new(r"^[ \t\x0c]*(?:[#\r\n]|$)").unwrap());
 
@@ -61,11 +62,9 @@ fn detect_encoding(bytes: &[u8]) -> Result<(String, &[u8]), DecodeError> {
 }
 
 fn find_cookie(line: &[u8], bom: bool) -> Result<Option<String>, DecodeError> {
-    let Ok(line) = std::str::from_utf8(line) else {
-        return Err(DecodeError("invalid or missing encoding declaration".into()));
-    };
     let Some(caps) = COOKIE_RE.captures(line) else { return Ok(None) };
-    let raw = &caps[1];
+    // The match is ASCII (`(?-u)`), so this cannot fail.
+    let raw = std::str::from_utf8(&caps[1]).unwrap_or_default();
     // `\w` with re.ASCII.
     if !raw.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.')) {
         let ascii: String =
@@ -138,6 +137,11 @@ fn codec(name: &str) -> Option<Codec> {
         "cp1250" | "windows_1250" => "windows-1250",
         "euc_jp" | "eucjp" => "euc-jp",
         "shift_jis" | "sjis" | "shiftjis" | "s_jis" => "shift_jis",
+        // WHATWG's Shift_JIS is Windows' (cp932), its EUC-KR is cp949, and
+        // GBK contains GB2312.
+        "cp932" | "ms932" | "mskanji" | "ms_kanji" => "shift_jis",
+        "cp949" | "ms949" | "uhc" => "euc-kr",
+        "gb2312" | "chinese" | "euc_cn" | "euccn" | "eucgb2312_cn" | "gb2312_1980" | "gb2312_80" | "iso_ir_58" => "gbk",
         "gbk" | "cp936" | "ms936" => "gbk",
         "gb18030" => "gb18030",
         "big5" | "big5_tw" | "csbig5" => "big5",

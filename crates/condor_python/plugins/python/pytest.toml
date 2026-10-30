@@ -12,3 +12,7 @@ always_used_keyword = "autouse"
 # pytest's default test discovery (python_files, python_functions).
 consumers = { names = ["test*"], files = ["test_*.py", "*_test.py", "conftest.py"] }
 requested_by_calls = ["pytest.mark.usefixtures"]
+
+# Module and class marks pytest reads by name.
+[[variables_used]]
+names = ["pytestmark"]
