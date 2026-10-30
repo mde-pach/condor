@@ -39,6 +39,8 @@ jobs:
       - uses: astral-sh/setup-uv@v10.3.3
       - run: cargo build --locked --release
       - name: vulture's test suite against condor
+        env:
+          CONDOR_PROFILE: release
         run: uv run --python 3.14 --with pytest python tests/upstream/run.py -q
       - name: Differential test on generated edge cases
         run: uv run --python 3.14 python harness/difftest.py --only edge-cases --report target/edge-report.md --baseline harness/edge-baseline.json

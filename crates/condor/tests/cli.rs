@@ -19,7 +19,12 @@ fn condor(dir: &Path, args: &[&str]) -> (i32, String) {
     let argv: Vec<String> = args.iter().map(|s| s.to_string()).collect();
     let mut out = Output::default();
     let code = run(&argv, dir, &mut out);
-    (code, String::from_utf8(out.stdout).unwrap())
+    (code, native_to_slash(String::from_utf8(out.stdout).unwrap()))
+}
+
+/// Reports use the platform's separator; the expected outputs use `/`.
+fn native_to_slash(text: String) -> String {
+    if cfg!(windows) { text.replace('\\', "/") } else { text }
 }
 
 #[test]
