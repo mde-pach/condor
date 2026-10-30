@@ -8,7 +8,8 @@ changed files are scanned again. Both take the usual options and read
 
 A language server on stdin and stdout. Unused code shows as faded warnings
 across the workspace, updated as you type, with a quick fix that adds
-`# noqa: <code>`. Syntax errors are left to your other tools.
+`# noqa: <code>`. Each workspace folder is analysed as its own project.
+Syntax errors are left to your other tools.
 
 Neovim (0.11+):
 

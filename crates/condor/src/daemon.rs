@@ -132,8 +132,13 @@ pub fn main(cwd: &Path) -> i32 {
     let listener = match UnixListener::bind(&path) {
         Ok(listener) => listener,
         Err(e) if e.kind() == std::io::ErrorKind::AddrInUse => {
-            if UnixStream::connect(&path).is_ok() {
-                return 0; // Another daemon already serves this directory.
+            // Another daemon serves this directory, or is binding it right
+            // now; otherwise the socket is left over from a crash.
+            for _ in 0..5 {
+                if UnixStream::connect(&path).is_ok() {
+                    return 0;
+                }
+                std::thread::sleep(Duration::from_millis(20));
             }
             let _ = std::fs::remove_file(&path);
             match UnixListener::bind(&path) {

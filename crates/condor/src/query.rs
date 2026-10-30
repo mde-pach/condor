@@ -51,7 +51,7 @@ impl Engines {
                 return INVALID_CMDLINE;
             }
         };
-        if let Err(msg) = engine.refresh() {
+        if let Err(msg) = engine.refresh(true) {
             out.line(Stream::Stderr, &msg);
             return INVALID_INPUT;
         }
