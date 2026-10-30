@@ -4,6 +4,9 @@
 
 Fixes from an audit of 0.2.0.
 
+- Windows: paths are printed relative to the working directory again
+  (the drive letter was dropped, so every path came out absolute).
+
 - Whitelist entries for names that are still defined but no longer reported
   (enum members, ignored or `# noqa` names, framework fields) are no longer
   reported as stale; entries are found from any working directory.

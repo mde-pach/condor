@@ -40,8 +40,8 @@ jobs:
           - { os: ubuntu-24.04, target: aarch64, manylinux: auto }
           - { os: ubuntu-24.04, target: x86_64, manylinux: musllinux_1_2 }
           - { os: ubuntu-24.04, target: aarch64, manylinux: musllinux_1_2 }
-          - { os: macos-14, target: x86_64 }
-          - { os: macos-14, target: aarch64 }
+          - { os: macos-15, target: x86_64 }
+          - { os: macos-15, target: aarch64 }
           - { os: windows-2025, target: x64 }
           - { os: windows-2025, target: aarch64 }
     runs-on: ${{ matrix.os }}
@@ -80,7 +80,7 @@ jobs:
     strategy:
       fail-fast: true
       matrix:
-        os: [ubuntu-24.04, ubuntu-24.04-arm, macos-14, windows-2025, windows-11-arm]
+        os: [ubuntu-24.04, ubuntu-24.04-arm, macos-15, windows-2025, windows-11-arm]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/download-artifact@v8
@@ -88,7 +88,7 @@ jobs:
           path: dist
           pattern: wheels-*
           merge-multiple: true
-      - uses: astral-sh/setup-uv@v10
+      - uses: astral-sh/setup-uv@v10.3.3
       - name: Install and run
         shell: bash
         run: |

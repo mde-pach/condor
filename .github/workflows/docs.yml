@@ -17,7 +17,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v10
+      - uses: astral-sh/setup-uv@v10.3.3
       - name: Build the site
         run: uvx --with mkdocs-material==9.7.6 mkdocs build --strict --site-dir site
       - uses: actions/upload-pages-artifact@v5
