@@ -2,19 +2,50 @@ name: CI
 
 on:
   push:
+    branches: [main]
   pull_request:
+  # The release runs it before publishing.
+  workflow_call:
+
+permissions:
+  contents: read
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-14, windows-2025]
+    runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@1.97
-      - uses: astral-sh/setup-uv@v6
-      - run: cargo test --workspace
-      - run: cargo build --workspace
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Clippy
+        if: runner.os == 'Linux'
+        run: cargo clippy --locked --workspace --all-targets -- -D warnings
+      - run: cargo test --locked --workspace
+
+  # Behaviour against vulture: its own test suite, and the generated edge
+  # cases compared with vulture (findings must match harness/edge-baseline.json).
+  vulture:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@1.97
+      - uses: Swatinem/rust-cache@v2
+      - uses: astral-sh/setup-uv@v10
+      - run: cargo build --locked --release
       - name: vulture's test suite against condor
         run: uv run --python 3.14 --with pytest python tests/upstream/run.py -q
-      - run: cargo build --release
       - name: Differential test on generated edge cases
-        run: uv run --python 3.14 python harness/difftest.py --only edge-cases --report target/edge-report.md
+        run: uv run --python 3.14 python harness/difftest.py --only edge-cases --report target/edge-report.md --baseline harness/edge-baseline.json
+
+  docs:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10
+      - run: uvx --with mkdocs-material==9.7.6 mkdocs build --strict --site-dir site

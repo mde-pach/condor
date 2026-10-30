@@ -1,0 +1,38 @@
+{
+ "edge-cases default": {
+  "only_condor": [
+   "decorators/decorators.py:6: unused class 'Widget' (60% confidence)"
+  ],
+  "only_vulture": [
+   "usage/all_and_strings.py:22: unused function 'g' (60% confidence)"
+  ]
+ },
+ "edge-cases ignores": {
+  "only_condor": [
+   "decorators/decorators.py:6: unused class 'Widget' (60% confidence)"
+  ],
+  "only_vulture": [
+   "usage/all_and_strings.py:22: unused function 'g' (60% confidence)"
+  ]
+ },
+ "edge-cases make_whitelist": {
+  "only_condor": [
+   "Widget  # unused class (decorators/decorators.py:6)"
+  ],
+  "only_vulture": [
+   "g  # unused function (usage/all_and_strings.py:22)"
+  ]
+ },
+ "edge-cases min_confidence": {
+  "only_condor": [],
+  "only_vulture": []
+ },
+ "edge-cases sort_by_size": {
+  "only_condor": [
+   "decorators/decorators.py:6: unused class 'Widget' (60% confidence, 39 lines)"
+  ],
+  "only_vulture": [
+   "usage/all_and_strings.py:22: unused function 'g' (60% confidence, 7 lines)"
+  ]
+ }
+}

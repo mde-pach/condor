@@ -70,12 +70,11 @@ pub fn py_splitlines(s: &str) -> Vec<&str> {
         if is_break {
             lines.push(&s[start..i]);
             let mut end = i + c.len_utf8();
-            if c == '\r' {
-                if let Some(&(j, '\n')) = chars.peek() {
+            if c == '\r'
+                && let Some(&(j, '\n')) = chars.peek() {
                     chars.next();
                     end = j + 1;
                 }
-            }
             start = end;
         }
     }

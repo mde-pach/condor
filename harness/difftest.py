@@ -148,6 +148,8 @@ def main():
     parser.add_argument("--only", nargs="*", help="project names to run")
     parser.add_argument("--jobs", type=int, default=4)
     parser.add_argument("--report", default=str(HERE / "REPORT.md"))
+    parser.add_argument("--baseline", help="JSON file of the expected differences; fail if they change")
+    parser.add_argument("--update-baseline", action="store_true", help="write the differences to --baseline")
     args = parser.parse_args()
 
     corpus = tomllib.loads((HERE / "corpus.toml").read_text())
@@ -174,13 +176,38 @@ def main():
                   f"-{r['only_vulture_count']} +{r['only_condor_count']} exit={r['vulture_exit']}/{r['condor_exit']} "
                   f"time={r['vulture_seconds']}s/{r['condor_seconds']}s", flush=True)
 
-    (HERE / "results.json").write_text(json.dumps(results, indent=1) + "\n")
     write_report(results, by_name, Path(args.report))
     if args.report == str(HERE / "REPORT.md"):
+        # The tracked results go with the tracked report only.
+        (HERE / "results.json").write_text(json.dumps(results, indent=1) + "\n")
         subprocess.run([sys.executable, str(HERE / "summarize.py")], check=True)
     exit_diffs = sum(not r["exit_equal"] for r in results)
     print(f"{len(results)} runs, {exit_diffs} with different exit codes")
-    sys.exit(1 if exit_diffs else 0)
+    failed = exit_diffs > 0
+    if args.baseline:
+        # Findings differences are expected (improvements); unexpected ones
+        # are regressions or new behaviour to review.
+        current = {
+            f"{r['project']} {r['flags']}": {"only_vulture": r["only_vulture"], "only_condor": r["only_condor"]}
+            for r in results
+        }
+        path = Path(args.baseline)
+        if args.update_baseline:
+            path.write_text(json.dumps(current, indent=1, sort_keys=True) + "\n")
+            print(f"wrote {path}")
+        else:
+            expected = json.loads(path.read_text())
+            changed = sorted(k for k in current.keys() | expected.keys() if current.get(k) != expected.get(k))
+            for key in changed:
+                print(f"findings differ from {path} for {key}:")
+                for side in ("only_vulture", "only_condor"):
+                    now, then = set(current.get(key, {}).get(side, [])), set(expected.get(key, {}).get(side, []))
+                    for line in sorted(now - then):
+                        print(f"  new {side}: {line}")
+                    for line in sorted(then - now):
+                        print(f"  gone {side}: {line}")
+            failed |= bool(changed)
+    sys.exit(1 if failed else 0)
 
 
 if __name__ == "__main__":

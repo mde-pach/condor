@@ -5,6 +5,9 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
+repository.workspace = true
+# Distributed on PyPI as `cndr`; the crate names on crates.io are taken.
+publish = false
 
 [dependencies]
 condor_core.workspace = true

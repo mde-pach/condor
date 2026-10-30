@@ -141,8 +141,8 @@ fn python_set_body(pat: &[char], start: usize, j: usize) -> String {
     while k > 0 {
         let prev_last = chunks[k - 1].chars().last();
         let cur_first = chunks[k].chars().next();
-        if let (Some(a), Some(b)) = (prev_last, cur_first) {
-            if a > b {
+        if let (Some(a), Some(b)) = (prev_last, cur_first)
+            && a > b {
                 let mut merged: String = {
                     let mut p = chunks[k - 1].clone();
                     p.pop();
@@ -152,7 +152,6 @@ fn python_set_body(pat: &[char], start: usize, j: usize) -> String {
                 chunks[k - 1] = merged;
                 chunks.remove(k);
             }
-        }
         k -= 1;
     }
     chunks

@@ -7,14 +7,19 @@ name = "cndr"
 description = "condor: a fast, vulture-compatible dead-code finder for Python, written in Rust"
 readme = "README.md"
 license = "MIT"
-license-files = ["LICENSE"]
+license-files = ["LICENSE", "NOTICE", "crates/condor_python/src/whitelists/LICENSE-vulture.txt"]
 requires-python = ">=3.8"
+authors = [{ name = "mde-pach" }]
 keywords = ["dead code", "unused code", "vulture", "static analysis"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Environment :: Console",
     "Intended Audience :: Developers",
+    "Operating System :: MacOS",
+    "Operating System :: Microsoft :: Windows",
+    "Operating System :: POSIX :: Linux",
     "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
     "Programming Language :: Rust",
     "Topic :: Software Development :: Quality Assurance",
 ]
@@ -24,6 +29,8 @@ dynamic = ["version"]
 Homepage = "https://github.com/mde-pach/condor"
 Documentation = "https://mde-pach.github.io/condor/"
 Repository = "https://github.com/mde-pach/condor"
+Issues = "https://github.com/mde-pach/condor/issues"
+Changelog = "https://github.com/mde-pach/condor/blob/main/CHANGELOG.md"
 
 [tool.maturin]
 bindings = "bin"

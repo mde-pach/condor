@@ -3,7 +3,9 @@ name = "condor_testapi"
 description = "JSON bridge that lets vulture's upstream test suite drive condor"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
+repository.workspace = true
 publish = false
 
 [dependencies]
