@@ -23,17 +23,21 @@ A `pass` body does not count, since it is as often a placeholder as an
 interface. The functions themselves are still reported when unused.
 (vulture #309, #317, #410)
 
+**Module `__getattr__` and `__dir__`.** Python calls them on attribute access
+to the module (PEP 562), so they are used.
+
 **I2. Declarative class fields.** Fields are set by construction and read by
 libraries (serialisation, validation, iteration), so they count as used
 (plugins `dataclasses`, `enum`, `typing`, `pydantic`, `attrs`, `msgspec`,
 `sqlmodel`, `django`):
 
 * annotated attributes of dataclasses, `TypedDict`, `NamedTuple`, pydantic
-  models, msgspec structs and SQLModel models; all attributes of attrs
-  classes;
+  models, msgspec structs and SQLModel models, except `ClassVar` ones;
+  annotated attributes of attrs classes and those assigned `attr.ib()`;
 * members of `Enum`, `IntEnum`, `StrEnum`, `Flag` and `IntFlag` classes;
-* Django model and form fields, `Meta` options, admin, migration and app
-  config attributes.
+* Django model and form fields (attributes assigned a call, such as
+  `models.CharField()`), `Meta` options, and the options Django defines for
+  views, admin classes, commands, app configs and migrations.
 
 Subclasses count too, across files. Trade-off: a field or enum member that is
 genuinely never read is no longer reported. (vulture #362, #335, #304)
@@ -75,13 +79,26 @@ directory. (vulture #430)
 **I4 detail.** An entry point `pkg.cli:main` uses `main` in `pkg/cli.py`;
 only when that file is not scanned does it use every `main`.
 
-**Framework entry points** (plugins `django`, `celery`, `flask`, `fastapi`,
+**Framework entry points** (plugins `unittest`, `django`, `celery`, `flask`, `fastapi`,
 `click`). Decorator patterns such as `*.get` and class names such as `Meta`
 apply in files that import the framework, or to decorators whose object is
-imported (`from myapp import app` then `@app.route`). Django model, view, command and app hooks, template filters and
-tags, and signal receivers; Celery tasks; Flask views, hooks, error handlers
-and template helpers; FastAPI path operations, event handlers, middleware and
-exception handlers; click commands and groups are used.
+imported (`from myapp import app` then `@app.route`). Django model, view,
+form (`clean_<field>`), command and app hooks, `Meta` classes, admin classes
+registered with `@admin.register`, app configs, migrations, template filters
+and tags, and signal receivers; Celery tasks; Flask views, hooks, error
+handlers and template helpers; FastAPI path operations, event handlers,
+middleware and exception handlers; click commands and groups; test case
+classes (`unittest.TestCase`, Django's test cases), whatever their name, are
+used. For
+Django, the hooks are the public methods of Django's base classes, so an
+override is used; its parameters, and those of signal receivers, are not
+reported, since Django imposes them.
+
+Classes are told apart by where they are defined, not by name: a base class
+resolves through the file's imports, through re-exports (`from .base import
+Base` in a package), and within a file to the nearest class of that name
+defined before. Only a name brought in by a star import can match any
+project class of that name.
 
 ## Usability
 

@@ -361,3 +361,9 @@ fn deep_class_hierarchies() {
         .unwrap();
     assert!(found.iter().all(|n| n.starts_with('C')), "fields are used");
 }
+
+#[test]
+fn module_getattr_is_used() {
+    let code = "def __getattr__(name):\n    return name\n\ndef __dir__():\n    return []\n\nclass A:\n    def helper(self):\n        pass\n\ndef unused():\n    pass\nA()\n";
+    assert_eq!(names(&[("m.py", code)]), ["helper", "unused"]);
+}

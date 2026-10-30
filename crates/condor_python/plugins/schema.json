@@ -113,9 +113,15 @@
             "enum": [
               "annotated",
               "assigned",
+              "calls",
               "all"
             ],
-            "default": "annotated"
+            "default": "annotated",
+            "description": "annotated (x: int), assigned (X = 1, x = f()), calls (assigned a call: name = models.CharField()), or all."
+          },
+          "attributes": {
+            "$ref": "#/$defs/names",
+            "description": "Only attributes with these names (the options a framework reads)."
           }
         },
         "anyOf": [

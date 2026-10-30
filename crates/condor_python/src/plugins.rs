@@ -15,7 +15,7 @@ use condor_core::{Analysis, ClassFacts, Decorator, FunctionFacts};
 use rustc_hash::{FxHashMap, FxHashSet};
 use serde::Deserialize;
 
-use crate::rules::{TAG_CLASS_ATTR, TAG_FIELD};
+use crate::rules::{TAG_CLASS_ATTR, TAG_CLASS_ATTR_CALL, TAG_FIELD};
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -83,7 +83,21 @@ pub enum Fields {
     #[default]
     Annotated,
     Assigned,
+    /// Assigned a call (`name = models.CharField()`).
+    Calls,
     All,
+}
+
+impl Fields {
+    /// Whether an attribute with scanner tag `tag` is selected.
+    fn selects(self, tag: u8) -> bool {
+        match tag {
+            TAG_FIELD => matches!(self, Fields::Annotated | Fields::All),
+            TAG_CLASS_ATTR => matches!(self, Fields::Assigned | Fields::All),
+            TAG_CLASS_ATTR_CALL => matches!(self, Fields::Assigned | Fields::Calls | Fields::All),
+            _ => false,
+        }
+    }
 }
 
 /// Attributes of matching classes (and their subclasses) that are used.
@@ -97,9 +111,13 @@ pub struct FieldsRule {
     pub names: Vec<String>,
     #[serde(default, deserialize_with = "selectors")]
     pub inherits: Vec<String>,
-    /// `annotated` (`x: int`), `assigned` (`X = 1`) or `all`.
+    /// `annotated` (`x: int`), `assigned` (`X = 1`), `calls` (`x = f()`) or
+    /// `all`.
     #[serde(default)]
     pub fields: Fields,
+    /// Only attributes with these names (the options a framework reads).
+    #[serde(default, deserialize_with = "selectors")]
+    pub attributes: Vec<String>,
 }
 
 /// Functions whose parameters are not reported: their signature is imposed.
@@ -210,7 +228,7 @@ fn validate(p: &Plugin) -> Result<(), String> {
         .used
         .iter()
         .flat_map(|r| [&r.decorated_by, &r.names, &r.in_classes_inheriting, &r.in_classes_based_on, &r.inherits])
-        .chain(p.fields_used.iter().flat_map(|r| [&r.decorated_by, &r.names, &r.inherits]))
+        .chain(p.fields_used.iter().flat_map(|r| [&r.decorated_by, &r.names, &r.inherits, &r.attributes]))
         .chain(p.parameters_used.iter().flat_map(|r| [&r.decorated_by, &r.names, &r.in_classes_inheriting, &r.in_classes_based_on]))
         .chain(p.variables_used.iter().map(|r| &r.names))
         .chain(p.injected_by_name.iter().flat_map(|r| {
@@ -328,38 +346,53 @@ type ClassId = (usize, usize);
 /// imports to the class they name.
 struct Hierarchy<'a> {
     analysis: &'a Analysis,
-    /// Classes by name, per file.
+    /// Classes by name, per file, in definition order.
     local: Vec<FxHashMap<&'a str, Vec<usize>>>,
+    /// Imported names, per file (local name -> dotted name).
+    aliases: Vec<FxHashMap<&'a str, &'a str>>,
+    /// Classes by name, across the project.
+    global: FxHashMap<&'a str, Vec<ClassId>>,
+    /// Files by module name (`pkg.models`).
+    modules: FxHashMap<String, Vec<usize>>,
+    paths: FxHashMap<&'a Path, usize>,
     /// The project classes each class's bases resolve to.
     bases: FxHashMap<ClassId, Vec<ClassId>>,
 }
 
+/// How many re-exports to follow (`from .base import Base` in a package).
+const MAX_REEXPORTS: u8 = 8;
+
 impl<'a> Hierarchy<'a> {
     fn new(analysis: &'a Analysis) -> Hierarchy<'a> {
-        let mut local: Vec<FxHashMap<&str, Vec<usize>>> = Vec::with_capacity(analysis.scans.len());
-        let mut global: FxHashMap<&str, Vec<ClassId>> = FxHashMap::default();
-        let mut modules: FxHashMap<String, Vec<usize>> = FxHashMap::default();
-        let mut paths: FxHashMap<&Path, usize> = FxHashMap::default();
+        let mut hierarchy = Hierarchy {
+            analysis,
+            local: Vec::with_capacity(analysis.scans.len()),
+            aliases: Vec::with_capacity(analysis.scans.len()),
+            global: FxHashMap::default(),
+            modules: FxHashMap::default(),
+            paths: FxHashMap::default(),
+            bases: FxHashMap::default(),
+        };
         for (si, scan) in analysis.scans.iter().enumerate() {
             let mut names: FxHashMap<&str, Vec<usize>> = FxHashMap::default();
             for (ci, c) in scan.classes.iter().enumerate() {
                 names.entry(c.name.as_str()).or_default().push(ci);
-                global.entry(c.name.as_str()).or_default().push((si, ci));
+                hierarchy.global.entry(c.name.as_str()).or_default().push((si, ci));
             }
-            local.push(names);
+            hierarchy.local.push(names);
+            hierarchy.aliases.push(scan.aliases.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect());
             if let Some(file) = scan.file.as_deref() {
-                paths.insert(file, si);
+                hierarchy.paths.insert(file, si);
                 for module in condor_core::paths::module_names(file) {
-                    modules.entry(module).or_default().push(si);
+                    hierarchy.modules.entry(module).or_default().push(si);
                 }
             }
         }
-        let mut hierarchy = Hierarchy { analysis, local, bases: FxHashMap::default() };
         let mut bases = FxHashMap::default();
         for (si, scan) in analysis.scans.iter().enumerate() {
             for (ci, c) in scan.classes.iter().enumerate() {
                 let resolved: Vec<ClassId> =
-                    c.bases.iter().flat_map(|b| hierarchy.resolve(si, b, &global, &modules, &paths)).collect();
+                    c.bases.iter().flat_map(|b| hierarchy.resolve(si, b, Some(ci), 0)).collect();
                 if !resolved.is_empty() {
                     bases.insert((si, ci), resolved);
                 }
@@ -373,7 +406,8 @@ impl<'a> Hierarchy<'a> {
         &self.analysis.scans[si].classes[ci]
     }
 
-    /// Classes named `name` defined in file `si`, top-level ones first.
+    /// The class named `name` that file `si` exports: a top-level one, else
+    /// any of that name in the file.
     fn named(&self, si: usize, name: &str) -> Vec<ClassId> {
         let Some(found) = self.local[si].get(name) else { return Vec::new() };
         let top: Vec<ClassId> =
@@ -381,24 +415,36 @@ impl<'a> Hierarchy<'a> {
         if top.is_empty() { found.iter().map(|&ci| (si, ci)).collect() } else { top }
     }
 
-    /// The project classes a base written in file `si` refers to. A base
-    /// imported from outside the project resolves to nothing (selectors
-    /// match its dotted name directly).
-    fn resolve(
-        &self,
-        si: usize,
-        base: &str,
-        global: &FxHashMap<&str, Vec<ClassId>>,
-        modules: &FxHashMap<String, Vec<usize>>,
-        paths: &FxHashMap<&Path, usize>,
-    ) -> Vec<ClassId> {
-        let by_name = |name: &str| global.get(name).cloned().unwrap_or_default();
+    /// The class a bare base name in class `before` of file `si` refers to:
+    /// the nearest one of that name defined before it (each test function
+    /// may define its own `class C`), else any in the file.
+    fn named_before(&self, si: usize, name: &str, before: Option<usize>) -> Vec<ClassId> {
+        let Some(found) = self.local[si].get(name) else { return Vec::new() };
+        match before.and_then(|b| found.iter().rev().find(|&&ci| ci < b)) {
+            Some(&ci) => vec![(si, ci)],
+            None => self.named(si, name),
+        }
+    }
+
+    fn by_name(&self, name: &str) -> Vec<ClassId> {
+        self.global.get(name).cloned().unwrap_or_default()
+    }
+
+    /// The project classes a base written in file `si` (in class `before`)
+    /// refers to. A base imported from outside the project resolves to
+    /// nothing (selectors match its dotted name directly).
+    fn resolve(&self, si: usize, base: &str, before: Option<usize>, depth: u8) -> Vec<ClassId> {
+        if depth > MAX_REEXPORTS {
+            return Vec::new();
+        }
         if let Some(rest) = base.strip_prefix('.') {
             // Relative import: `.models.Base` is `Base` in `./models.py`.
             let level = 1 + rest.len() - rest.trim_start_matches('.').len();
             let rest = rest.trim_start_matches('.');
             let (module, name) = rest.rsplit_once('.').unwrap_or(("", rest));
-            let Some(mut dir) = self.analysis.scans[si].file.as_deref().and_then(Path::parent) else { return by_name(name) };
+            let Some(mut dir) = self.analysis.scans[si].file.as_deref().and_then(Path::parent) else {
+                return self.by_name(name);
+            };
             for _ in 1..level {
                 dir = dir.parent().unwrap_or(dir);
             }
@@ -409,29 +455,45 @@ impl<'a> Hierarchy<'a> {
                 vec![module_dir.with_extension("py"), module_dir.join("__init__.py")]
             };
             for file in &candidates {
-                if let Some(&target) = paths.get(file.as_path()) {
-                    let found = self.named(target, name);
-                    return if found.is_empty() { by_name(name) } else { found };
+                if let Some(&target) = self.paths.get(file.as_path()) {
+                    return self.exported(target, name, depth);
                 }
             }
-            return by_name(name);
+            // A module that was not scanned.
+            return self.by_name(name);
         }
         match base.rsplit_once('.') {
-            // Defined in this file, else (a star import) any project class
-            // of that name.
             None => {
-                let found = self.named(si, base);
-                if found.is_empty() { by_name(base) } else { found }
-            }
-            Some((module, name)) => match modules.get(module) {
-                Some(files) => {
-                    let found: Vec<ClassId> = files.iter().flat_map(|&f| self.named(f, name)).collect();
-                    // Re-exported by the module (`from .base import Base`).
-                    if found.is_empty() { by_name(name) } else { found }
+                let found = self.named_before(si, base, before);
+                if !found.is_empty() {
+                    found
+                } else if self.analysis.scans[si].star_import {
+                    // Brought in by `from m import *`: any project class.
+                    self.by_name(base)
+                } else {
+                    // A builtin, or a name the file does not define.
+                    Vec::new()
                 }
+            }
+            Some((module, name)) => match self.modules.get(module) {
+                Some(files) => files.iter().flat_map(|&f| self.exported(f, name, depth)).collect(),
                 None => Vec::new(),
             },
         }
+    }
+
+    /// The class module file `si` provides as `name`: defined there, or
+    /// imported there (a re-export such as `from .base import Base` in a
+    /// package's `__init__.py`).
+    fn exported(&self, si: usize, name: &str, depth: u8) -> Vec<ClassId> {
+        let found = self.named(si, name);
+        if !found.is_empty() {
+            return found;
+        }
+        if let Some(target) = self.aliases[si].get(name) {
+            return self.resolve(si, target, None, depth + 1);
+        }
+        if self.analysis.scans[si].star_import { self.by_name(name) } else { Vec::new() }
     }
 
     /// Whether class `start` matches `direct` itself or through any of its
@@ -532,16 +594,15 @@ impl<'h, 'a> ClassMatcher<'h, 'a> {
         self
     }
 
-    /// Whether a class named `class` in file `si` matches.
-    fn matches(&mut self, si: usize, class: &str) -> bool {
-        if !self.names.is_empty() && self.names.matches(class) && self.gate.file(si) {
+    /// Whether class `id` matches, by name or through its hierarchy.
+    fn matches(&mut self, id: ClassId) -> bool {
+        if !self.names.is_empty() && self.names.matches(&self.hierarchy.class(id).name) && self.gate.file(id.0) {
             return true;
         }
         if self.decorated_by.is_empty() && self.inherits.is_empty() {
             return false;
         }
-        let ids = self.hierarchy.named(si, class);
-        ids.into_iter().any(|id| self.matches_id(id))
+        self.matches_id(id)
     }
 
     fn matches_id(&mut self, id: ClassId) -> bool {
@@ -573,21 +634,58 @@ fn file_matches(patterns: &[String], path: &Path) -> bool {
 /// Apply the active plugins once every file is scanned: remove the items
 /// they declare used.
 pub fn apply(analysis: &mut Analysis, plugins: &[Plugin]) {
-    let imported: FxHashSet<&str> = analysis.scans.iter().flat_map(|s| s.imports.iter().map(String::as_str)).collect();
-    let active: Vec<&Plugin> = plugins
-        .iter()
-        .filter(|p| p.plugin.when_imported.is_empty() || p.plugin.when_imported.iter().any(|m| imported.contains(m.as_str())))
-        .collect();
-    if active.is_empty() {
+    let remove = removals(analysis, plugins);
+    if remove.is_empty() {
         return;
     }
-    let hierarchy = Hierarchy::new(analysis);
-    // (scan index, item index) pairs to remove.
-    let mut remove: FxHashSet<(usize, usize)> = FxHashSet::default();
+    for (si, scan) in analysis.scans.iter_mut().enumerate() {
+        let mut index = 0;
+        scan.items.retain(|_| {
+            let keep = !remove.contains_key(&(si, index));
+            index += 1;
+            keep
+        });
+    }
+}
 
-    for plugin in &active {
+/// The items the plugins would remove, each with the rule that removes it
+/// first (`django: used[3]`), in scan order. For reviewing the rules.
+pub fn explain(analysis: &Analysis, plugins: &[Plugin]) -> Vec<(condor_core::Item, String)> {
+    let remove = removals(analysis, plugins);
+    let mut out: Vec<((usize, usize), condor_core::Item, String)> = remove
+        .into_iter()
+        .map(|((si, ii), (plugin, kind, rule))| {
+            let item = analysis.scans[si].items[ii].clone();
+            ((si, ii), item, format!("{}: {kind}[{rule}]", plugins[plugin].plugin.name))
+        })
+        .collect();
+    out.sort_by_key(|(at, _, _)| *at);
+    out.into_iter().map(|(_, item, why)| (item, why)).collect()
+}
+
+/// Why an item is removed: (plugin index, rule kind, rule index).
+type Why = (usize, &'static str, usize);
+
+/// The items to remove, by (scan index, item index).
+fn removals(analysis: &Analysis, plugins: &[Plugin]) -> FxHashMap<(usize, usize), Why> {
+    let mut remove: FxHashMap<(usize, usize), Why> = FxHashMap::default();
+    let imported: FxHashSet<&str> = analysis.scans.iter().flat_map(|s| s.imports.iter().map(String::as_str)).collect();
+    let active: Vec<(usize, &Plugin)> = plugins
+        .iter()
+        .enumerate()
+        .filter(|(_, p)| p.plugin.when_imported.is_empty() || p.plugin.when_imported.iter().any(|m| imported.contains(m.as_str())))
+        .collect();
+    if active.is_empty() {
+        return remove;
+    }
+    let hierarchy = Hierarchy::new(analysis);
+
+    for &(pi, plugin) in &active {
         let gate = Gate::new(analysis, plugin);
-        for rule in &plugin.used {
+        let mut mark = |at: (usize, usize), kind: &'static str, rule: usize| {
+            remove.entry(at).or_insert((pi, kind, rule));
+        };
+        for (ri, rule) in plugin.used.iter().enumerate() {
             let decorated_by = Selector::new(&rule.decorated_by);
             let names = Selector::new(&rule.names);
             let mut in_classes = ClassMatcher::new(&hierarchy, &gate, &[], &rule.in_classes_inheriting);
@@ -604,11 +702,11 @@ pub fn apply(analysis: &mut Analysis, plugins: &[Plugin]) {
                         let ok = (decorated_by.is_empty() || gate.decorated(si, &decorated_by, &f.decorators))
                             && names_ok(&f.name)
                             && (rule.in_classes_inheriting.is_empty()
-                                || f.class.as_deref().is_some_and(|c| in_classes.matches(si, c)))
+                                || f.class.is_some_and(|ci| in_classes.matches((si, ci))))
                             && (rule.in_classes_based_on.is_empty()
-                                || f.class.as_deref().is_some_and(|c| based_on.matches(si, c)));
-                        if ok {
-                            remove.extend(f.item.map(|i| (si, i)));
+                                || f.class.is_some_and(|ci| based_on.matches((si, ci))));
+                        if ok && let Some(i) = f.item {
+                            mark((si, i), "used", ri);
                         }
                     }
                 }
@@ -617,32 +715,34 @@ pub fn apply(analysis: &mut Analysis, plugins: &[Plugin]) {
                         let ok = (decorated_by.is_empty() || gate.decorated(si, &decorated_by, &c.decorators))
                             && names_ok(&c.name)
                             && (rule.inherits.is_empty() || classes.matches_id((si, ci)));
-                        if ok {
-                            remove.extend(c.item.map(|i| (si, i)));
+                        if ok && let Some(i) = c.item {
+                            mark((si, i), "used", ri);
                         }
                     }
                 }
             }
         }
 
-        for rule in &plugin.fields_used {
+        for (ri, rule) in plugin.fields_used.iter().enumerate() {
             let mut matcher =
                 ClassMatcher::new(&hierarchy, &gate, &rule.decorated_by, &rule.inherits).with_names(&rule.names);
+            let attributes = Selector::new(&rule.attributes);
             for (si, scan) in analysis.scans.iter().enumerate() {
-                for (ii, item) in scan.items.iter().enumerate() {
-                    let wanted = match item.tag {
-                        TAG_FIELD => rule.fields != Fields::Assigned,
-                        TAG_CLASS_ATTR => rule.fields != Fields::Annotated,
-                        _ => false,
-                    };
-                    if wanted && item.context.as_deref().is_some_and(|c| matcher.matches(si, c)) {
-                        remove.insert((si, ii));
+                for (ci, class) in scan.classes.iter().enumerate() {
+                    if class.fields.is_empty() || !matcher.matches((si, ci)) {
+                        continue;
+                    }
+                    for &ii in &class.fields {
+                        let item = &scan.items[ii];
+                        if rule.fields.selects(item.tag) && (attributes.is_empty() || attributes.matches(&item.name)) {
+                            mark((si, ii), "fields_used", ri);
+                        }
                     }
                 }
             }
         }
 
-        for rule in &plugin.parameters_used {
+        for (ri, rule) in plugin.parameters_used.iter().enumerate() {
             let decorated_by = Selector::new(&rule.decorated_by);
             let names = Selector::new(&rule.names);
             let mut in_classes = ClassMatcher::new(&hierarchy, &gate, &[], &rule.in_classes_inheriting);
@@ -653,43 +753,41 @@ pub fn apply(analysis: &mut Analysis, plugins: &[Plugin]) {
                     let ok = (decorated_by.is_empty() || gate.decorated(si, &decorated_by, &f.decorators))
                         && (names.is_empty() || (names.matches(&f.name) && (anchored || gate.file(si))))
                         && (rule.in_classes_inheriting.is_empty()
-                            || f.class.as_deref().is_some_and(|c| in_classes.matches(si, c)))
+                            || f.class.is_some_and(|ci| in_classes.matches((si, ci))))
                         && (rule.in_classes_based_on.is_empty()
-                            || f.class.as_deref().is_some_and(|c| based_on.matches(si, c)));
+                            || f.class.is_some_and(|ci| based_on.matches((si, ci))));
                     if ok {
-                        remove.extend(f.params.iter().filter_map(|(_, i)| i.map(|i| (si, i))));
+                        for i in f.params.iter().filter_map(|(_, i)| *i) {
+                            mark((si, i), "parameters_used", ri);
+                        }
                     }
                 }
             }
         }
 
-        for rule in &plugin.injected_by_name {
-            apply_injected(analysis, rule, &mut remove);
+        for (ri, rule) in plugin.injected_by_name.iter().enumerate() {
+            for at in injected(analysis, rule) {
+                mark(at, "injected_by_name", ri);
+            }
         }
 
-        for rule in &plugin.variables_used {
+        for (ri, rule) in plugin.variables_used.iter().enumerate() {
             let names = Selector::new(&rule.names);
             for (si, scan) in analysis.scans.iter().enumerate().filter(|(si, _)| gate.file(*si)) {
                 for (ii, item) in scan.items.iter().enumerate() {
                     if item.kind == condor_core::ItemKind::Variable && names.matches(&item.name) {
-                        remove.insert((si, ii));
+                        mark((si, ii), "variables_used", ri);
                     }
                 }
             }
         }
     }
-
-    for (si, scan) in analysis.scans.iter_mut().enumerate() {
-        let mut index = 0;
-        scan.items.retain(|_| {
-            let keep = !remove.contains(&(si, index));
-            index += 1;
-            keep
-        });
-    }
+    remove
 }
 
-fn apply_injected(analysis: &Analysis, rule: &InjectedRule, remove: &mut FxHashSet<(usize, usize)>) {
+/// The items an `injected_by_name` rule declares used.
+fn injected(analysis: &Analysis, rule: &InjectedRule) -> Vec<(usize, usize)> {
+    let mut remove = Vec::new();
     let providers_by = Selector::new(&rule.providers.decorated_by);
     let provider_names = Selector::new(&rule.providers.names);
     let consumer_names = Selector::new(&rule.consumers.names);
@@ -727,4 +825,5 @@ fn apply_injected(analysis: &Analysis, rule: &InjectedRule, remove: &mut FxHashS
             remove.extend(f.item.map(|i| (si, i)));
         }
     }
+    remove
 }

@@ -9,6 +9,8 @@ use rustc_hash::FxHashMap;
 pub const TAG_FIELD: u8 = 1;
 /// An attribute assigned in a class body (`NAME = 1`).
 pub const TAG_CLASS_ATTR: u8 = 2;
+/// An attribute assigned a call in a class body (`name = models.CharField()`).
+pub const TAG_CLASS_ATTR_CALL: u8 = 3;
 
 /// Whether `body` (or `params`) binds `name` in the scope itself (not in
 /// nested functions or classes).
@@ -51,13 +53,14 @@ pub fn binds_name(body: &[Stmt], params: Option<&Parameters>, name: &str) -> boo
     v.found
 }
 
-/// The file's imports: local name -> dotted name it refers to, and the
-/// top-level names of the imported modules. Relative imports are not
-/// resolved.
-pub fn collect_imports(body: &[Stmt]) -> (FxHashMap<String, String>, Vec<String>) {
+/// The file's imports: local name -> dotted name it refers to, the
+/// top-level names of the imported modules, and whether there is a star
+/// import. Relative imports are not resolved.
+pub fn collect_imports(body: &[Stmt]) -> (FxHashMap<String, String>, Vec<String>, bool) {
     struct Imports {
         aliases: FxHashMap<String, String>,
         modules: Vec<String>,
+        star: bool,
     }
     impl<'b> Visitor<'b> for Imports {
         fn visit_stmt(&mut self, stmt: &'b Stmt) {
@@ -84,6 +87,7 @@ pub fn collect_imports(body: &[Stmt]) -> (FxHashMap<String, String>, Vec<String>
                     };
                     for a in &i.names {
                         if a.name.as_str() == "*" {
+                            self.star = true;
                             continue;
                         }
                         let local = a.asname.as_ref().unwrap_or(&a.name);
@@ -95,6 +99,7 @@ pub fn collect_imports(body: &[Stmt]) -> (FxHashMap<String, String>, Vec<String>
                     self.modules.push(module.split('.').next().unwrap_or(module).to_string());
                     for a in &i.names {
                         if a.name.as_str() == "*" {
+                            self.star = true;
                             continue;
                         }
                         let local = a.asname.as_ref().unwrap_or(&a.name);
@@ -105,9 +110,9 @@ pub fn collect_imports(body: &[Stmt]) -> (FxHashMap<String, String>, Vec<String>
             }
         }
     }
-    let mut v = Imports { aliases: FxHashMap::default(), modules: Vec::new() };
+    let mut v = Imports { aliases: FxHashMap::default(), modules: Vec::new(), star: false };
     v.visit_body(body);
     v.modules.sort_unstable();
     v.modules.dedup();
-    (v.aliases, v.modules)
+    (v.aliases, v.modules, v.star)
 }

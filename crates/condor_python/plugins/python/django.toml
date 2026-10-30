@@ -1,53 +1,264 @@
 [plugin]
 name = "django"
-description = "Model fields, Meta options, framework hooks, template tags and signal receivers."
+description = "Model fields, Meta options, framework hooks and options, template tags and signal receivers."
 when_imported = ["django"]
 
-# Model and form fields are reached through the ORM and forms by name.
-[[fields_used]]
-inherits = ["django.db.models.Model", "django.forms.Form", "django.forms.ModelForm"]
-fields = "assigned"
+# Lists of hooks and options are the public methods and class attributes of
+# Django's base classes (taken from Django 5.1's source): a subclass that
+# overrides one is called by Django, whose signature it must keep. Other
+# methods and attributes are used only if code refers to them by name.
 
-# Option classes: `class Meta:` in models and forms, admin and migration options.
+# Models: fields and managers are assigned a call (`name = models.CharField()`)
+# and reached through the ORM by name; other class attributes are plain class
+# variables. Custom user models set options read by django.contrib.auth.
 [[fields_used]]
-names = ["Meta"]
+inherits = ["django.db.models.Model", "django.contrib.gis.db.models.Model", "django.contrib.auth.models.AbstractUser",
+    "django.contrib.auth.models.AbstractBaseUser", "django.contrib.auth.base_user.AbstractBaseUser",
+    "django.contrib.auth.models.PermissionsMixin"]
+fields = "calls"
+
+[[fields_used]]
+inherits = ["django.db.models.Model", "django.contrib.gis.db.models.Model", "django.contrib.auth.models.AbstractUser",
+    "django.contrib.auth.models.AbstractBaseUser", "django.contrib.auth.base_user.AbstractBaseUser",
+    "django.contrib.auth.models.PermissionsMixin"]
+attributes = ["USERNAME_FIELD", "REQUIRED_FIELDS", "EMAIL_FIELD"]
 fields = "all"
 
-[[fields_used]]
-inherits = ["django.contrib.admin.ModelAdmin", "django.db.migrations.Migration", "django.apps.AppConfig"]
-fields = "assigned"
-
-# Methods Django calls.
+# Model hooks.
 [[used]]
-in_classes_inheriting = ["django.db.models.Model"]
-names = ["save", "delete", "clean", "get_absolute_url"]
+in_classes_inheriting = ["django.db.models.Model", "django.contrib.gis.db.models.Model", "django.contrib.auth.models.AbstractUser",
+    "django.contrib.auth.models.AbstractBaseUser", "django.contrib.auth.base_user.AbstractBaseUser",
+    "django.contrib.auth.models.PermissionsMixin"]
+names = ["acheck_password", "adelete", "arefresh_from_db", "asave", "check", "check_password", "clean", "clean_fields",
+    "date_error_message", "delete", "email_user", "from_db", "full_clean", "get_absolute_url", "get_all_permissions",
+    "get_constraints", "get_deferred_fields", "get_email_field_name", "get_full_name", "get_group_permissions",
+    "get_session_auth_fallback_hash", "get_session_auth_hash", "get_short_name", "get_user_permissions",
+    "get_username", "has_module_perms", "has_perm", "has_perms", "has_usable_password", "is_anonymous",
+    "is_authenticated", "natural_key", "normalize_username", "prepare_database_save", "refresh_from_db", "save",
+    "save_base", "serializable_value", "set_password", "set_unusable_password", "unique_error_message",
+    "validate_constraints", "validate_unique"]
 
-[[used]]
-in_classes_inheriting = ["django.views.View", "django.views.generic.*"]
-names = ["get", "post", "put", "patch", "delete", "head", "options", "dispatch", "setup", "get_queryset", "get_object", "get_context_data", "get_success_url", "form_valid", "form_invalid",
-    "get_form", "get_form_class", "get_form_kwargs", "get_initial", "get_template_names", "get_paginate_by", "get_ordering"]
+[[parameters_used]]
+in_classes_inheriting = ["django.db.models.Model", "django.contrib.gis.db.models.Model", "django.contrib.auth.models.AbstractUser",
+    "django.contrib.auth.models.AbstractBaseUser", "django.contrib.auth.base_user.AbstractBaseUser",
+    "django.contrib.auth.models.PermissionsMixin"]
+names = ["acheck_password", "adelete", "arefresh_from_db", "asave", "check", "check_password", "clean", "clean_fields",
+    "date_error_message", "delete", "email_user", "from_db", "full_clean", "get_absolute_url", "get_all_permissions",
+    "get_constraints", "get_deferred_fields", "get_email_field_name", "get_full_name", "get_group_permissions",
+    "get_session_auth_fallback_hash", "get_session_auth_hash", "get_short_name", "get_user_permissions",
+    "get_username", "has_module_perms", "has_perm", "has_perms", "has_usable_password", "is_anonymous",
+    "is_authenticated", "natural_key", "normalize_username", "prepare_database_save", "refresh_from_db", "save",
+    "save_base", "serializable_value", "set_password", "set_unusable_password", "unique_error_message",
+    "validate_constraints", "validate_unique"]
 
-# Generic views read these class attributes.
+# Forms: fields are assigned a call (`email = forms.EmailField()`);
+# validation calls clean() and clean_<field>().
 [[fields_used]]
-inherits = ["django.views.View", "django.views.generic.*"]
-fields = "assigned"
+inherits = ["django.forms.Form", "django.forms.ModelForm", "django.forms.BaseForm", "django.forms.BaseModelForm",
+    "django.contrib.auth.forms.*"]
+fields = "calls"
 
-# Management commands, imported from django.core.management or its base
-# module (BaseCommand, AppCommand, LabelCommand).
+# Form hooks and options.
+[[used]]
+in_classes_inheriting = ["django.forms.Form", "django.forms.ModelForm", "django.forms.BaseForm", "django.forms.BaseModelForm",
+    "django.contrib.auth.forms.*"]
+names = ["add_error", "add_initial_prefix", "add_prefix", "changed_data", "clean", "clean_*", "errors", "full_clean",
+    "get_context", "get_initial_for_field", "has_changed", "has_error", "hidden_fields", "is_multipart", "is_valid",
+    "media", "non_field_errors", "order_fields", "save", "validate_unique", "visible_fields"]
+
+[[parameters_used]]
+in_classes_inheriting = ["django.forms.Form", "django.forms.ModelForm", "django.forms.BaseForm", "django.forms.BaseModelForm",
+    "django.contrib.auth.forms.*"]
+names = ["add_error", "add_initial_prefix", "add_prefix", "changed_data", "clean", "clean_*", "errors", "full_clean",
+    "get_context", "get_initial_for_field", "has_changed", "has_error", "hidden_fields", "is_multipart", "is_valid",
+    "media", "non_field_errors", "order_fields", "save", "validate_unique", "visible_fields"]
+
+[[fields_used]]
+inherits = ["django.forms.Form", "django.forms.ModelForm", "django.forms.BaseForm", "django.forms.BaseModelForm",
+    "django.contrib.auth.forms.*"]
+attributes = ["default_renderer", "error_css_class", "required_css_class", "field_order", "prefix", "use_required_attribute",
+    "template_name", "template_name_div", "template_name_label", "template_name_p", "template_name_table",
+    "template_name_ul"]
+fields = "all"
+
+# Class-based views (generic views, auth views and mixins): hooks and options.
+[[used]]
+in_classes_inheriting = ["django.views.View", "django.views.generic.*", "django.contrib.auth.views.*", "django.contrib.auth.mixins.*",
+    "django.contrib.messages.views.*"]
+names = ["as_view", "delete", "dispatch", "form_invalid", "form_valid", "get", "get_allow_empty", "get_allow_future",
+    "get_context_data", "get_context_object_name", "get_date_field", "get_date_list", "get_date_list_period",
+    "get_dated_items", "get_dated_queryset", "get_day", "get_day_format", "get_default_redirect_url", "get_form",
+    "get_form_class", "get_form_kwargs", "get_initial", "get_login_url", "get_make_object_list", "get_month",
+    "get_month_format", "get_next_day", "get_next_month", "get_next_week", "get_next_year", "get_object",
+    "get_ordering", "get_paginate_by", "get_paginate_orphans", "get_paginator", "get_permission_denied_message",
+    "get_permission_required", "get_prefix", "get_previous_day", "get_previous_month", "get_previous_week",
+    "get_previous_year", "get_queryset", "get_redirect_field_name", "get_redirect_url", "get_slug_field",
+    "get_success_message", "get_success_url", "get_success_url_allowed_hosts", "get_template_names", "get_test_func",
+    "get_user", "get_week", "get_week_format", "get_year", "get_year_format", "handle_no_permission", "has_permission",
+    "head", "http_method_not_allowed", "options", "paginate_queryset", "patch", "post", "put", "render_to_response",
+    "setup", "test_func", "uses_datetime_field", "view_is_async"]
+
+[[parameters_used]]
+in_classes_inheriting = ["django.views.View", "django.views.generic.*", "django.contrib.auth.views.*", "django.contrib.auth.mixins.*",
+    "django.contrib.messages.views.*"]
+names = ["as_view", "delete", "dispatch", "form_invalid", "form_valid", "get", "get_allow_empty", "get_allow_future",
+    "get_context_data", "get_context_object_name", "get_date_field", "get_date_list", "get_date_list_period",
+    "get_dated_items", "get_dated_queryset", "get_day", "get_day_format", "get_default_redirect_url", "get_form",
+    "get_form_class", "get_form_kwargs", "get_initial", "get_login_url", "get_make_object_list", "get_month",
+    "get_month_format", "get_next_day", "get_next_month", "get_next_week", "get_next_year", "get_object",
+    "get_ordering", "get_paginate_by", "get_paginate_orphans", "get_paginator", "get_permission_denied_message",
+    "get_permission_required", "get_prefix", "get_previous_day", "get_previous_month", "get_previous_week",
+    "get_previous_year", "get_queryset", "get_redirect_field_name", "get_redirect_url", "get_slug_field",
+    "get_success_message", "get_success_url", "get_success_url_allowed_hosts", "get_template_names", "get_test_func",
+    "get_user", "get_week", "get_week_format", "get_year", "get_year_format", "handle_no_permission", "has_permission",
+    "head", "http_method_not_allowed", "options", "paginate_queryset", "patch", "post", "put", "render_to_response",
+    "setup", "test_func", "uses_datetime_field", "view_is_async"]
+
+[[fields_used]]
+inherits = ["django.views.View", "django.views.generic.*", "django.contrib.auth.views.*", "django.contrib.auth.mixins.*",
+    "django.contrib.messages.views.*"]
+attributes = ["allow_empty", "allow_future", "authentication_form", "content_type", "context_object_name", "date_field",
+    "date_list_period", "day", "day_format", "email_template_name", "extra_context", "extra_email_context", "fields",
+    "form_class", "from_email", "html_email_template_name", "http_method_names", "initial", "login_url",
+    "make_object_list", "model", "month", "month_format", "next_page", "ordering", "page_kwarg", "paginate_by",
+    "paginate_orphans", "paginator_class", "pattern_name", "permanent", "permission_denied_message",
+    "permission_required", "pk_url_kwarg", "post_reset_login", "post_reset_login_backend", "prefix",
+    "query_pk_and_slug", "query_string", "queryset", "raise_exception", "redirect_authenticated_user",
+    "redirect_field_name", "reset_url_token", "response_class", "slug_field", "slug_url_kwarg",
+    "subject_template_name", "success_message", "success_url", "success_url_allowed_hosts", "template_engine",
+    "template_name", "template_name_field", "template_name_suffix", "title", "token_generator", "url", "week",
+    "week_format", "year", "year_format"]
+fields = "all"
+
+# Admin classes, inlines, list filters and admin sites: hooks and options.
+[[used]]
+in_classes_inheriting = ["django.contrib.admin.*", "django.contrib.auth.admin.*"]
+names = ["action_checkbox", "actions", "add_action", "add_view", "admin_view", "app_index", "autocomplete_view",
+    "catch_all_view", "change_view", "changeform_view", "changelist_view", "check", "choices",
+    "construct_change_message", "delete_model", "delete_queryset", "delete_view", "disable_action", "each_context",
+    "expected_parameters", "field_admin_ordering", "field_choices", "formfield_for_choice_field",
+    "formfield_for_dbfield", "formfield_for_foreignkey", "formfield_for_manytomany", "get_action",
+    "get_action_choices", "get_actions", "get_app_list", "get_autocomplete_fields", "get_changeform_initial_data",
+    "get_changelist", "get_changelist_form", "get_changelist_formset", "get_changelist_instance",
+    "get_deleted_objects", "get_empty_value_display", "get_exclude", "get_extra", "get_facet_counts",
+    "get_facet_queryset", "get_field_queryset", "get_fields", "get_fieldsets", "get_form", "get_formset",
+    "get_formset_kwargs", "get_formsets_with_inlines", "get_inline_formsets", "get_inline_instances", "get_inlines",
+    "get_list_display", "get_list_display_links", "get_list_filter", "get_list_select_related", "get_log_entries",
+    "get_lookup_condition", "get_max_num", "get_min_num", "get_model_admin", "get_model_perms", "get_object",
+    "get_ordering", "get_paginator", "get_prepopulated_fields", "get_preserved_filters", "get_queryset",
+    "get_readonly_fields", "get_search_fields", "get_search_results", "get_sortable_by", "get_urls",
+    "get_view_on_site_url", "has_add_permission", "has_change_permission", "has_delete_permission",
+    "has_module_permission", "has_output", "has_permission", "has_view_or_change_permission", "has_view_permission",
+    "history_view", "i18n_javascript", "include_empty_choice", "index", "is_registered", "log_addition", "log_change",
+    "log_deletion", "log_deletions", "login", "logout", "lookup_allowed", "lookups", "media", "message_user",
+    "password_change", "password_change_done", "queryset", "register", "render_change_form", "render_delete_form",
+    "response_action", "response_add", "response_change", "response_delete", "response_post_save_add",
+    "response_post_save_change", "save_form", "save_formset", "save_model", "save_related", "to_field_allowed",
+    "unregister", "urls", "user_change_password", "value"]
+
+[[parameters_used]]
+in_classes_inheriting = ["django.contrib.admin.*", "django.contrib.auth.admin.*"]
+names = ["action_checkbox", "actions", "add_action", "add_view", "admin_view", "app_index", "autocomplete_view",
+    "catch_all_view", "change_view", "changeform_view", "changelist_view", "check", "choices",
+    "construct_change_message", "delete_model", "delete_queryset", "delete_view", "disable_action", "each_context",
+    "expected_parameters", "field_admin_ordering", "field_choices", "formfield_for_choice_field",
+    "formfield_for_dbfield", "formfield_for_foreignkey", "formfield_for_manytomany", "get_action",
+    "get_action_choices", "get_actions", "get_app_list", "get_autocomplete_fields", "get_changeform_initial_data",
+    "get_changelist", "get_changelist_form", "get_changelist_formset", "get_changelist_instance",
+    "get_deleted_objects", "get_empty_value_display", "get_exclude", "get_extra", "get_facet_counts",
+    "get_facet_queryset", "get_field_queryset", "get_fields", "get_fieldsets", "get_form", "get_formset",
+    "get_formset_kwargs", "get_formsets_with_inlines", "get_inline_formsets", "get_inline_instances", "get_inlines",
+    "get_list_display", "get_list_display_links", "get_list_filter", "get_list_select_related", "get_log_entries",
+    "get_lookup_condition", "get_max_num", "get_min_num", "get_model_admin", "get_model_perms", "get_object",
+    "get_ordering", "get_paginator", "get_prepopulated_fields", "get_preserved_filters", "get_queryset",
+    "get_readonly_fields", "get_search_fields", "get_search_results", "get_sortable_by", "get_urls",
+    "get_view_on_site_url", "has_add_permission", "has_change_permission", "has_delete_permission",
+    "has_module_permission", "has_output", "has_permission", "has_view_or_change_permission", "has_view_permission",
+    "history_view", "i18n_javascript", "include_empty_choice", "index", "is_registered", "log_addition", "log_change",
+    "log_deletion", "log_deletions", "login", "logout", "lookup_allowed", "lookups", "media", "message_user",
+    "password_change", "password_change_done", "queryset", "register", "render_change_form", "render_delete_form",
+    "response_action", "response_add", "response_change", "response_delete", "response_post_save_add",
+    "response_post_save_change", "save_form", "save_formset", "save_model", "save_related", "to_field_allowed",
+    "unregister", "urls", "user_change_password", "value"]
+
+[[fields_used]]
+inherits = ["django.contrib.admin.*", "django.contrib.auth.admin.*"]
+attributes = ["action_form", "actions", "actions_on_bottom", "actions_on_top", "actions_selection_counter", "add_fieldsets",
+    "add_form", "add_form_template", "app_index_template", "autocomplete_fields", "can_delete", "change_form_template",
+    "change_list_template", "change_password_form", "change_user_password_template", "checks_class", "classes",
+    "date_hierarchy", "delete_confirmation_template", "delete_selected_confirmation_template", "empty_value_display",
+    "enable_nav_sidebar", "exclude", "extra", "fields", "fieldsets", "filter_horizontal", "filter_vertical",
+    "final_catch_all_view", "fk_name", "form", "formfield_overrides", "formset", "index_template", "index_title",
+    "inlines", "list_display", "list_display_links", "list_editable", "list_filter", "list_max_show_all",
+    "list_per_page", "list_select_related", "list_separator", "login_form", "login_template", "logout_template",
+    "max_num", "min_num", "model", "object_history_template", "ordering", "paginator", "parameter_name",
+    "password_change_done_template", "password_change_template", "popup_response_template", "prepopulated_fields",
+    "preserve_filters", "radio_fields", "raw_id_fields", "readonly_fields", "save_as", "save_as_continue",
+    "save_on_top", "search_fields", "search_help_text", "show_change_link", "show_facets", "show_full_result_count",
+    "site_header", "site_title", "site_url", "sortable_by", "template", "title", "verbose_name", "verbose_name_plural",
+    "view_on_site"]
+fields = "all"
+
+# Management commands, imported from django.core.management or its base module (BaseCommand, AppCommand, LabelCommand).
 [[used]]
 in_classes_inheriting = ["django.core.management.*Command"]
-names = ["handle", "handle_app_config", "handle_label", "add_arguments"]
+names = ["add_arguments", "check", "create_parser", "execute", "get_version", "handle", "handle_app_config", "handle_label",
+    "run_from_argv"]
+
+[[parameters_used]]
+in_classes_inheriting = ["django.core.management.*Command"]
+names = ["add_arguments", "check", "create_parser", "execute", "get_version", "handle", "handle_app_config", "handle_label",
+    "run_from_argv"]
+
+[[fields_used]]
+inherits = ["django.core.management.*Command"]
+attributes = ["base_stealth_options", "help", "label", "missing_args_message", "output_transaction",
+    "requires_migrations_checks", "requires_system_checks", "show_last", "stealth_options",
+    "suppressed_base_arguments"]
+fields = "all"
+
+# Test cases are found and run by the test runner, whatever their name.
+[[used]]
+inherits = ["django.test.*TestCase", "django.test.testcases.*TestCase", "django.contrib.staticfiles.testing.StaticLiveServerTestCase"]
+
+# Commands are found by file name, admin classes registered with the
+# decorator, app configs through INSTALLED_APPS and apps.py, migrations by
+# file name.
+[[used]]
+inherits = ["django.core.management.*Command", "django.apps.AppConfig", "django.db.migrations.Migration"]
 
 [[used]]
-inherits = ["django.core.management.*Command"]
+decorated_by = ["django.contrib.admin.register"]
 
 [[used]]
 in_classes_inheriting = ["django.apps.AppConfig"]
 names = ["ready"]
 
+[[fields_used]]
+inherits = ["django.apps.AppConfig"]
+attributes = ["default", "default_auto_field", "label", "name", "path", "verbose_name"]
+fields = "all"
+
+[[fields_used]]
+inherits = ["django.db.migrations.Migration"]
+attributes = ["atomic", "dependencies", "initial", "operations", "replaces", "run_before"]
+fields = "all"
+
+# Option classes: `class Meta:` in models and forms, read by their metaclass.
+[[used]]
+names = ["Meta"]
+
+[[fields_used]]
+names = ["Meta"]
+fields = "all"
+
 # Template filters and tags registered on a `register = template.Library()`.
 [[used]]
 decorated_by = ["register.filter", "register.simple_tag", "register.inclusion_tag", "register.tag"]
 
+# Signal receivers, called with (sender, **kwargs).
 [[used]]
+decorated_by = ["django.dispatch.receiver"]
+
+[[parameters_used]]
 decorated_by = ["django.dispatch.receiver"]

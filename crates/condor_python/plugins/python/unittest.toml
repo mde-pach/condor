@@ -1,0 +1,7 @@
+[plugin]
+name = "unittest"
+description = "Test case classes are found and run by the test runner, whatever their name."
+when_imported = ["unittest"]
+
+[[used]]
+inherits = ["unittest.TestCase", "unittest.case.TestCase", "unittest.IsolatedAsyncioTestCase", "unittest.async_case.IsolatedAsyncioTestCase"]

@@ -83,8 +83,6 @@ pub struct Item {
     pub confidence: u8,
     /// Language-defined role of the item for project-wide rules (0: none).
     pub tag: u8,
-    /// Language-defined context for `tag`, such as the enclosing class.
-    pub context: Option<String>,
 }
 
 impl Item {

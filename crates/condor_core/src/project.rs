@@ -29,6 +29,11 @@ pub struct FileScan {
     pub functions: Vec<FunctionFacts>,
     /// Top-level names of the modules the file imports.
     pub imports: Vec<String>,
+    /// Imported names: local name -> dotted name it refers to (relative
+    /// imports keep their dots), for following re-exports.
+    pub aliases: Vec<(String, String)>,
+    /// The file has a star import, so names it uses may come from anywhere.
+    pub star_import: bool,
     /// String arguments of calls matching `ScanOptions::call_hints`, which
     /// count as names requested from a framework.
     pub requested: Vec<String>,
@@ -51,16 +56,19 @@ pub struct ClassFacts {
     pub decorators: Vec<Decorator>,
     /// Index of the class's item in `FileScan::items`, if it was defined.
     pub item: Option<usize>,
-    /// The enclosing class, for nested classes.
-    pub class: Option<String>,
+    /// The enclosing class (index in `FileScan::classes`), for nested classes.
+    pub class: Option<usize>,
+    /// Items for the attributes its body defines that have a tag.
+    pub fields: Vec<usize>,
 }
 
 /// A function or method.
 #[derive(Clone, Debug, Default)]
 pub struct FunctionFacts {
     pub name: String,
-    /// The class whose body defines it, for methods.
-    pub class: Option<String>,
+    /// The class whose body defines it (index in `FileScan::classes`), for
+    /// methods.
+    pub class: Option<usize>,
     pub decorators: Vec<Decorator>,
     /// Index of the function's item in `FileScan::items`, if it was defined.
     pub item: Option<usize>,
@@ -180,7 +188,6 @@ impl Analysis {
                 message: Some(format!("stale whitelist entry '{}': {} no longer defines it", entry.name, entry.path)),
                 confidence: 100,
                 tag: 0,
-                context: None,
             });
             if let Some(pos) = scan.uses.iter().position(|u| *u == entry.name) {
                 scan.uses.remove(pos);

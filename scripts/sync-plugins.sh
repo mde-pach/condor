@@ -8,6 +8,7 @@ rm -rf "$dest"
 mkdir -p "$dest"
 cp "$src/schema.json" "$dest/"
 cp -R "$src/python" "$dest/python"
+cp -R "$src/tests" "$dest/tests"
 rev=$(git -C "$src" rev-parse --verify -q HEAD 2>/dev/null || echo "uncommitted")
 dirty=$(git -C "$src" status --porcelain 2>/dev/null | head -1)
 {

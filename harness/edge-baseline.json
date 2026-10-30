@@ -4,6 +4,7 @@
    "decorators/decorators.py:6: unused class 'Widget' (60% confidence)"
   ],
   "only_vulture": [
+   "dunder/module.py:1: unused function '__getattr__' (60% confidence)",
    "usage/all_and_strings.py:22: unused function 'g' (60% confidence)"
   ]
  },
@@ -20,6 +21,7 @@
    "Widget  # unused class (decorators/decorators.py:6)"
   ],
   "only_vulture": [
+   "__getattr__  # unused function (dunder/module.py:1)",
    "g  # unused function (usage/all_and_strings.py:22)"
   ]
  },
@@ -32,6 +34,7 @@
    "decorators/decorators.py:6: unused class 'Widget' (60% confidence, 39 lines)"
   ],
   "only_vulture": [
+   "dunder/module.py:1: unused function '__getattr__' (60% confidence, 2 lines)",
    "usage/all_and_strings.py:22: unused function 'g' (60% confidence, 7 lines)"
   ]
  }

@@ -220,6 +220,26 @@ fn entry_points_use_their_module() {
 }
 
 #[test]
+fn entry_points_and_plugins_in_one_file() {
+    // Removing the entry point must not shift what the plugins remove.
+    let dir = project(
+        "entry_plugins",
+        &[
+            ("pyproject.toml", "[project.scripts]\ntool = \"pkg.cli:main\"\n"),
+            (
+                "pkg/cli.py",
+                "from pydantic import BaseModel\n\n\ndef main():\n    pass\n\n\nclass M(BaseModel):\n    x: int\n\n\n\
+                 def helper():\n    pass\n\n\ndef other():\n    pass\n\n\nprint(M)\n",
+            ),
+        ],
+    );
+    assert_eq!(
+        condor(&dir, &["pkg"]).1,
+        "pkg/cli.py:12: unused function 'helper' (60% confidence)\npkg/cli.py:16: unused function 'other' (60% confidence)\n"
+    );
+}
+
+#[test]
 fn coding_cookie_in_a_latin1_comment() {
     let dir = project("cookie", &[]);
     std::fs::create_dir_all(&dir).unwrap();

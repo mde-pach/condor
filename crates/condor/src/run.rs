@@ -191,6 +191,8 @@ pub fn add_whitelists(
 /// Once every file is scanned: entry points, the language's project-wide
 /// rules, and stale whitelist entries.
 pub fn finish(lang: &Python, analysis: &mut Analysis, config: &Config, cwd: &Path) {
+    // First, while items keep the indices the scan gave them.
+    lang.link(analysis);
     // An entry point uses its object in its module's file; if that file is
     // not scanned, any definition with its names.
     for entry in &config.entry_points {
@@ -206,7 +208,6 @@ pub fn finish(lang: &Python, analysis: &mut Analysis, config: &Config, cwd: &Pat
             analysis.push(FileScan { uses: entry.path.clone(), ..FileScan::default() });
         }
     }
-    lang.link(analysis);
     analysis.check_whitelist_entries(cwd);
 }
 

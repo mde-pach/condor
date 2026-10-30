@@ -17,9 +17,11 @@ fn collect(dir: &Path, out: &mut Vec<PathBuf>) {
 
 fn main() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("plugins");
+    // Only the rule files; `tests/` holds the cases for `plugin_cases.rs`.
+    let rules = root.join("python");
     println!("cargo:rerun-if-changed={}", root.display());
     let mut files = Vec::new();
-    collect(&root, &mut files);
+    collect(&rules, &mut files);
     let mut code = String::from("pub static PLUGINS: &[(&str, &str)] = &[\n");
     for f in &files {
         println!("cargo:rerun-if-changed={}", f.display());
