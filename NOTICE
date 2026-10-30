@@ -1,0 +1,7 @@
+condor includes code from vulture (https://github.com/jendrikseipp/vulture),
+copyright Jendrik Seipp, licensed under the MIT License:
+
+- the whitelists in crates/condor_python/src/whitelists, compiled into the
+  condor executable (licence: crates/condor_python/src/whitelists/LICENSE-vulture.txt);
+- its test suite, in tests/upstream/vulture-2.16 (not distributed in packages;
+  licence: tests/upstream/vulture-2.16/LICENSE.txt).

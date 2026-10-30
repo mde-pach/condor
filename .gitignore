@@ -1,3 +1,5 @@
 /target
 /uv.lock
 /.venv
+/site
+__pycache__/

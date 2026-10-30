@@ -3,9 +3,19 @@ name = "attrs"
 description = "attrs classes: annotated attributes and attr.ib() assignments are fields."
 when_imported = ["attr", "attrs"]
 
+# Fields are annotated attributes (auto_attribs, `define`) and attributes
+# assigned `attr.ib()` / `attrs.field()`; other class attributes are plain
+# class variables.
 [[fields_used]]
 decorated_by = [
     "attr.s", "attr.attrs", "attr.define", "attr.frozen", "attr.mutable", "attr.dataclass",
     "attrs.define", "attrs.frozen", "attrs.mutable",
 ]
-fields = "all"
+fields = "annotated"
+
+[[fields_used]]
+decorated_by = [
+    "attr.s", "attr.attrs", "attr.define", "attr.frozen", "attr.mutable", "attr.dataclass",
+    "attrs.define", "attrs.frozen", "attrs.mutable",
+]
+fields = "calls"

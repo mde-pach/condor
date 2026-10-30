@@ -22,8 +22,8 @@ pub struct Config {
     pub only: Vec<String>,
     /// Plugin files or directories added to the bundled plugins.
     pub plugins: Vec<String>,
-    /// Names used by the project's entry points (`[project.scripts]`, ...).
-    pub entry_point_names: Vec<String>,
+    /// The project's entry points (`[project.scripts]`, ...).
+    pub entry_points: Vec<EntryPoint>,
 }
 
 impl Default for Config {
@@ -42,7 +42,7 @@ impl Default for Config {
             no_report: Vec::new(),
             only: Vec::new(),
             plugins: Vec::new(),
-            entry_point_names: Vec::new(),
+            entry_points: Vec::new(),
         }
     }
 }
@@ -113,19 +113,32 @@ fn convert(v: &toml::Value) -> Value {
 pub fn parse_toml(content: &str) -> Result<Vec<(String, Value)>, Result<InputError, String>> {
     let doc: toml::Table = content.parse().map_err(|e: toml::de::Error| Err(e.to_string()))?;
     let mut settings = Vec::new();
+    let tool = match doc.get("tool") {
+        None => None,
+        Some(toml::Value::Table(t)) => Some(t),
+        Some(_) => return Err(Ok(InputError("tool must be a table".into()))),
+    };
     for section in ["vulture", "condor"] {
-        if let Some(toml::Value::Table(t)) = doc.get("tool").and_then(|t| t.get(section)) {
-            settings.extend(t.iter().map(|(k, v)| (k.clone(), convert(v))));
+        match tool.and_then(|t| t.get(section)) {
+            None => {}
+            Some(toml::Value::Table(t)) => settings.extend(t.iter().map(|(k, v)| (k.clone(), convert(v)))),
+            Some(_) => return Err(Ok(InputError(format!("[tool.{section}] must be a table")))),
         }
     }
     check_input_config(&settings).map_err(Ok)?;
     Ok(settings)
 }
 
-/// Names used by entry points: the object path after `:` in
-/// `[project.scripts]`, `[project.gui-scripts]`, `[project.entry-points.*]`
-/// and `[tool.poetry.scripts]` (`pkg.cli:main` uses `main`).
-pub fn entry_point_names(content: &str) -> Vec<String> {
+/// An entry point's object: `pkg.cli:App.run` is `App.run` in `pkg.cli`.
+#[derive(Clone, Debug, PartialEq)]
+pub struct EntryPoint {
+    pub module: String,
+    pub path: Vec<String>,
+}
+
+/// The objects named by `[project.scripts]`, `[project.gui-scripts]`,
+/// `[project.entry-points.*]` and `[tool.poetry.scripts]`.
+pub fn entry_points(content: &str) -> Vec<EntryPoint> {
     let Ok(doc) = content.parse::<toml::Table>() else { return Vec::new() };
     let mut tables: Vec<&toml::Table> = Vec::new();
     if let Some(project) = doc.get("project").and_then(|p| p.as_table()) {
@@ -146,8 +159,11 @@ pub fn entry_point_names(content: &str) -> Vec<String> {
                 _ => "",
             };
             let object = target.split('[').next().unwrap_or("").trim();
-            if let Some((_, path)) = object.split_once(':') {
-                names.extend(path.split('.').map(|p| p.trim().to_string()).filter(|p| !p.is_empty()));
+            if let Some((module, path)) = object.split_once(':') {
+                let path: Vec<String> = path.split('.').map(|p| p.trim().to_string()).filter(|p| !p.is_empty()).collect();
+                if !path.is_empty() {
+                    names.push(EntryPoint { module: module.trim().to_string(), path });
+                }
             }
         }
     }
@@ -165,6 +181,7 @@ fn strings(list: &[toml::Value], key: &str) -> Result<Vec<String>, String> {
 }
 
 /// What `make_config` produced.
+#[allow(clippy::large_enum_variant)] // built once per run
 pub enum Outcome {
     /// The configuration, and the verbose "Reading configuration" line.
     Config(Config, Option<String>),
@@ -180,11 +197,14 @@ pub enum Outcome {
 /// `toml_content` replaces reading the file (vulture's `tomlfile` parameter).
 pub fn make_config(cli: CliArgs, cwd: &Path, toml_content: Option<(&str, String)>) -> Outcome {
     let exit = |code: i32, stderr: String| Outcome::Exit(Exit { code, stdout: String::new(), stderr });
+    let cli_only_given = cli.only.is_some();
     let mut entry_points = Vec::new();
+    // `plugins` in a config file are relative to its directory.
+    let mut plugin_base: Option<std::path::PathBuf> = None;
     let (settings, detected) = match toml_content {
         Some((label, content)) => match parse_toml(&content) {
             Ok(s) => {
-                entry_points = entry_point_names(&content);
+                entry_points = self::entry_points(&content);
                 (s, Some(label.to_string()))
             }
             Err(Ok(InputError(msg))) => return Outcome::InputError(msg, None),
@@ -198,21 +218,24 @@ pub fn make_config(cli: CliArgs, cwd: &Path, toml_content: Option<(&str, String)
                     Err(e) => return exit(1, format!("Error: could not read {}: {e}\n", toml_path.display())),
                 };
                 let label = toml_path.display().to_string();
+                plugin_base = toml_path.parent().map(Path::to_path_buf);
                 match parse_toml(&content) {
                     Ok(s) => {
-                        entry_points = entry_point_names(&content);
+                        entry_points = self::entry_points(&content);
                         (s, Some(label))
                     }
                     Err(Ok(InputError(msg))) => return Outcome::InputError(msg, None),
                     Err(Err(msg)) => return exit(1, format!("Error: invalid TOML in {label}: {msg}\n")),
                 }
+            } else if cli.config_given {
+                return Outcome::InputError(format!("Config file not found: {}", toml_path.display()), None);
             } else {
                 (Vec::new(), None)
             }
         }
     };
 
-    let mut config = Config { entry_point_names: entry_points, ..Config::default() };
+    let mut config = Config { entry_points, ..Config::default() };
     for (key, value) in &settings {
         let list = |v: &Value| match v {
             Value::List(l) => strings(l, key),
@@ -223,15 +246,38 @@ pub fn make_config(cli: CliArgs, cwd: &Path, toml_content: Option<(&str, String)
             ("exclude", v) => list(v).map(|l| config.exclude = l),
             ("ignore_decorators", v) => list(v).map(|l| config.ignore_decorators = l),
             ("ignore_names", v) => list(v).map(|l| config.ignore_names = l),
-            ("make_whitelist", Value::Bool(b)) => Ok(config.make_whitelist = *b),
-            ("min_confidence", Value::Int(i)) => Ok(config.min_confidence = *i),
-            ("sort_by_size", Value::Bool(b)) => Ok(config.sort_by_size = *b),
-            ("verbose", Value::Bool(b)) => Ok(config.verbose = *b),
-            ("config", Value::Str(s)) => Ok(config.config = s.clone()),
-            ("format", Value::Str(s)) => Ok(config.format = s.clone()),
+            ("make_whitelist", Value::Bool(b)) => {
+                let _: () = config.make_whitelist = *b;
+                Ok(())
+            },
+            ("min_confidence", Value::Int(i)) => {
+                let _: () = config.min_confidence = *i;
+                Ok(())
+            },
+            ("sort_by_size", Value::Bool(b)) => {
+                let _: () = config.sort_by_size = *b;
+                Ok(())
+            },
+            ("verbose", Value::Bool(b)) => {
+                let _: () = config.verbose = *b;
+                Ok(())
+            },
+            ("config", Value::Str(s)) => {
+                let _: () = config.config = s.clone();
+                Ok(())
+            },
+            ("format", Value::Str(s)) => {
+                let _: () = config.format = s.clone();
+                Ok(())
+            },
             ("no_report", v) => list(v).map(|l| config.no_report = l),
             ("only", v) => list(v).map(|l| config.only = l),
-            ("plugins", v) => list(v).map(|l| config.plugins = l),
+            ("plugins", v) => list(v).map(|l| {
+                config.plugins = match &plugin_base {
+                    Some(base) => l.iter().map(|p| base.join(p).to_string_lossy().into_owned()).collect(),
+                    None => l,
+                }
+            }),
             _ => Ok(()),
         };
         if let Err(msg) = res {
@@ -276,8 +322,19 @@ pub fn make_config(cli: CliArgs, cwd: &Path, toml_content: Option<(&str, String)
     if !matches!(config.format.as_str(), "text" | "json" | "sarif") {
         return Outcome::InputError(format!("Unknown format: {} (expected text, json or sarif)", config.format), None);
     }
+    config.only.retain(|k| !k.trim().is_empty());
+    if cli_only_given && config.only.is_empty() {
+        return Outcome::InputError("--only needs at least one kind".into(), None);
+    }
     if let Some(bad) = config.only.iter().find(|k| condor_core::ItemKind::parse(k).is_none()) {
-        return Outcome::InputError(format!("Unknown kind in only: {bad}"), None);
+        let kinds: Vec<&str> = condor_core::ItemKind::ALL.iter().map(|k| k.as_str()).collect();
+        return Outcome::InputError(
+            format!("Unknown kind in only: {bad} (expected {}, or their V codes)", kinds.join(", ")),
+            None,
+        );
+    }
+    if config.make_whitelist && config.format != "text" {
+        return Outcome::InputError("--make-whitelist writes Python; it cannot be combined with --format json or sarif".into(), None);
     }
 
     let banner = match &detected {

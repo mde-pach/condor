@@ -28,6 +28,7 @@ fn main() {
         "make_config" => make_config(&req),
         "constants" => constants(),
         "noqa_search" => noqa_search(&req),
+        "explain" => explain(&req),
         op => json!({"error": format!("unknown op {op}")}),
     };
     println!("{resp}");
@@ -219,6 +220,46 @@ fn cli_dict(cli: &CliArgs) -> Value {
 
 fn exit_json(e: &args::Exit) -> Value {
     json!({"exit": {"code": e.code, "stdout": e.stdout, "stderr": e.stderr}})
+}
+
+/// For `harness/plant.py`: scan a project as `condor ARGV` does and list the
+/// items the plugins remove, with the rule that removes each.
+fn explain(req: &Value) -> Value {
+    let cwd = PathBuf::from(req["cwd"].as_str().unwrap_or("."));
+    let cli = match args::parse(&strings(&req["argv"])) {
+        Ok(cli) => cli,
+        Err(e) => return exit_json(&e),
+    };
+    let Outcome::Config(config, _) = config::make_config(cli, &cwd, None) else {
+        return json!({"error": "invalid configuration"});
+    };
+    let result = (|| {
+        let modules = condor::discover::get_modules(&config.paths, &cwd)?;
+        let python = run::load_python(&config, &cwd)?;
+        let opts = run::scan_options(&python, &config, &cwd);
+        let exclude = run::exclude_patterns(&config.exclude);
+        let mut analysis = Analysis::default();
+        let mut out = Output::default();
+        let _ = run::scavenge(&python, &modules, &exclude, &opts, &mut analysis, &mut out);
+        Ok::<_, String>(condor_python::plugins::explain(&analysis, &python.plugins))
+    })();
+    match result {
+        Ok(removed) => Value::Array(
+            removed
+                .iter()
+                .map(|(item, why)| {
+                    json!({
+                        "path": condor_core::paths::format_path(&item.file, &cwd).to_string_lossy(),
+                        "line": item.first_line,
+                        "name": item.name,
+                        "kind": item.kind.as_str(),
+                        "rule": why,
+                    })
+                })
+                .collect(),
+        ),
+        Err(e) => json!({"error": e}),
+    }
 }
 
 fn parse_args(req: &Value) -> Value {

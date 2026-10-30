@@ -1,6 +1,8 @@
 //! The long-running modes: `condor query` (and its daemon) and `condor server`.
 
-use std::io::BufReader;
+#[cfg(unix)]
+use std::io::BufRead;
+use std::io::{BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
@@ -76,7 +78,7 @@ fn engine_uses_unsaved_buffers() {
     let config = condor::config::Config { paths: vec![".".into()], ..Default::default() };
     let mut engine = Engine::new(config.clone(), &dir).unwrap();
     let unused = |engine: &mut Engine| {
-        engine.refresh().unwrap();
+        engine.refresh(false).unwrap();
         let analysis = engine.analyze(&mut Output::default(), false).unwrap();
         condor::run::select(&analysis, &config, &dir).iter().map(|i| i.name.clone()).collect::<Vec<_>>()
     };
@@ -116,7 +118,6 @@ fn query_through_the_daemon() {
     assert_eq!(condor(&["query"]), condor(&["."]));
     assert_eq!(condor(&["query", "b.py"]), (0, String::new()));
 
-    use std::io::{BufRead, Write};
     let mut stream = std::os::unix::net::UnixStream::connect(&sockets[0]).unwrap();
     stream.write_all(b"{\"op\": \"shutdown\"}\n").unwrap();
     let mut answer = String::new();
@@ -140,6 +141,11 @@ struct Client {
 
 impl Client {
     fn start(root: &Path) -> Client {
+        let root = condor::server::path_to_uri(root).unwrap();
+        Client::start_with(json!({"rootUri": root.as_str(), "capabilities": {}}))
+    }
+
+    fn start_with(init: Value) -> Client {
         let mut child = Command::new(env!("CARGO_BIN_EXE_condor"))
             .arg("server")
             .current_dir(std::env::temp_dir())
@@ -149,8 +155,7 @@ impl Client {
             .unwrap();
         let reader = BufReader::new(child.stdout.take().unwrap());
         let mut client = Client { child, reader, next_id: 0 };
-        let root = condor::server::path_to_uri(root).unwrap();
-        let init = client.request("initialize", json!({"rootUri": root.as_str(), "capabilities": {}}));
+        let init = client.request("initialize", init);
         assert_eq!(init["serverInfo"]["name"], "condor");
         client.notify("initialized", json!({}));
         client
@@ -179,11 +184,10 @@ impl Client {
     /// The next diagnostics published for a file whose URI ends with `name`.
     fn diagnostics(&mut self, name: &str) -> Vec<Value> {
         loop {
-            if let Message::Notification(n) = Message::read(&mut self.reader).unwrap().unwrap() {
-                if n.method == "textDocument/publishDiagnostics" && n.params["uri"].as_str().unwrap().ends_with(name) {
+            if let Message::Notification(n) = Message::read(&mut self.reader).unwrap().unwrap()
+                && n.method == "textDocument/publishDiagnostics" && n.params["uri"].as_str().unwrap().ends_with(name) {
                     return n.params["diagnostics"].as_array().unwrap().clone();
                 }
-            }
         }
     }
 }
@@ -225,4 +229,118 @@ fn language_server() {
     client.request("shutdown", Value::Null);
     client.notify("exit", Value::Null);
     assert!(client.child.wait().unwrap().success());
+}
+
+#[test]
+fn engine_keeps_the_last_parsed_version_while_typing() {
+    let dir = project("typing", &[("a.py", "def f():\n    pass\n"), ("b.py", "from a import f\nf()\n")]);
+    let config = condor::config::Config { paths: vec![".".into()], ..Default::default() };
+    let mut engine = Engine::new(config.clone(), &dir).unwrap();
+    engine.refresh(true).unwrap();
+    engine.set_overlay(dir.join("b.py"), Some("from a import f\nf()\nif x\n".into()));
+    engine.refresh(false).unwrap();
+    let analysis = engine.analyze(&mut Output::default(), false).unwrap();
+    assert!(condor::run::select(&analysis, &config, &dir).is_empty(), "b.py still uses f");
+    // Unsaved new files count too.
+    engine.set_overlay(dir.join("b.py"), None);
+    std::fs::write(dir.join("b.py"), "").unwrap();
+    engine.set_overlay(dir.join("sub/new.py"), Some("from a import f\nf()\n".into()));
+    engine.refresh(true).unwrap();
+    let analysis = engine.analyze(&mut Output::default(), false).unwrap();
+    assert!(condor::run::select(&analysis, &config, &dir).is_empty(), "sub/new.py uses f");
+}
+
+// Windows has no change time to tell such an edit apart.
+#[cfg(unix)]
+#[test]
+fn query_sees_edits_that_restore_size_and_mtime() {
+    let dir = project("same_stamp", &[("a.py", "def f():\n    pass\n")]);
+    let mut engines = Engines::default();
+    assert_eq!(query(&mut engines, &dir, &[]).1, "a.py:1: unused function 'f' (60% confidence)\n");
+    let file = std::fs::File::options().write(true).open(dir.join("a.py")).unwrap();
+    let modified = file.metadata().unwrap().modified().unwrap();
+    std::thread::sleep(std::time::Duration::from_millis(20));
+    std::fs::write(dir.join("a.py"), "def g():\n    pass\n").unwrap();
+    file.set_modified(modified).unwrap();
+    assert_eq!(query(&mut engines, &dir, &[]).1, "a.py:1: unused function 'g' (60% confidence)\n");
+}
+
+#[test]
+fn language_server_folders_and_noqa() {
+    let one = project("folders_one", &[("a.py", "import os  # noqa: V107\r\r\ndef f():\r    pass\r")]);
+    let two = project("folders_two", &[("b.py", "def g():\n    pass\n")]);
+    let folders: Vec<Value> = [&one, &two]
+        .iter()
+        .map(|d| json!({"uri": condor::server::path_to_uri(d).unwrap().as_str(), "name": "x"}))
+        .collect();
+    let mut client = Client::start_with(json!({"workspaceFolders": folders, "capabilities": {}}));
+    let mut seen = std::collections::HashMap::new();
+    while seen.len() < 2 {
+        if let Message::Notification(n) = Message::read(&mut client.reader).unwrap().unwrap()
+            && n.method == "textDocument/publishDiagnostics" {
+                seen.insert(n.params["uri"].as_str().unwrap().rsplit('/').next().unwrap().to_string(), n.params["diagnostics"].clone());
+            }
+    }
+    assert_eq!(seen["b.py"][0]["message"], "unused function 'g' (60% confidence)");
+    let diags = seen["a.py"].as_array().unwrap().clone();
+    // Lines end with `\r` (and one `\r\n`): `def f` is on line 2.
+    assert_eq!(diags[1]["range"]["start"]["line"], 2);
+    let a = condor::server::path_to_uri(&one.join("a.py")).unwrap();
+    let params = json!({"textDocument": {"uri": a.as_str()}, "range": diags[0]["range"], "context": {"diagnostics": [diags[0]]}});
+    let actions = client.request("textDocument/codeAction", params);
+    let edit = &actions[0]["edit"]["changes"][a.as_str()][0];
+    assert_eq!(edit["newText"], ",V104");
+    assert_eq!(edit["range"]["start"], json!({"line": 0, "character": 23}));
+    client.request("shutdown", Value::Null);
+    client.notify("exit", Value::Null);
+    assert!(client.child.wait().unwrap().success());
+}
+
+#[test]
+fn language_server_rejects_oversized_messages() {
+    let mut child = Command::new(env!("CARGO_BIN_EXE_condor"))
+        .arg("server")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child.stdin.take().unwrap().write_all(b"Content-Length: 99999999999999999\r\n\r\n").unwrap();
+    let out = child.wait_with_output().unwrap();
+    assert!(String::from_utf8_lossy(&out.stderr).contains("too large"));
+}
+
+#[cfg(unix)]
+#[test]
+fn a_stalled_client_does_not_block_the_daemon() {
+    let dir = project("stalled", &[("a.py", "x = 1\n")]);
+    let runtime = std::env::temp_dir().join(format!("cds{}", std::process::id()));
+    std::fs::create_dir_all(&runtime).unwrap();
+    let query = || {
+        Command::new(env!("CARGO_BIN_EXE_condor"))
+            .arg("query")
+            .current_dir(&dir)
+            .env("XDG_RUNTIME_DIR", &runtime)
+            .env("CONDOR_DAEMON_IDLE", "60")
+            .output()
+            .unwrap()
+    };
+    assert_eq!(query().status.code(), Some(3));
+    let socket = std::fs::read_dir(runtime.join(format!("condor-{}", unsafe { libc::getuid() })))
+        .unwrap()
+        .next()
+        .unwrap()
+        .unwrap()
+        .path();
+    let mut stalled = std::os::unix::net::UnixStream::connect(&socket).unwrap();
+    stalled.write_all(b"{\"argv\": [").unwrap();
+    let start = std::time::Instant::now();
+    assert_eq!(query().status.code(), Some(3));
+    assert!(start.elapsed() < std::time::Duration::from_secs(10));
+    drop(stalled);
+    let mut stop = std::os::unix::net::UnixStream::connect(&socket).unwrap();
+    stop.write_all(b"{\"op\": \"shutdown\"}\n").unwrap();
+    let mut answer = String::new();
+    let _ = BufReader::new(&stop).read_line(&mut answer);
+    let _ = std::fs::remove_dir_all(&runtime);
 }

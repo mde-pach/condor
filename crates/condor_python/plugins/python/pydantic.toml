@@ -4,7 +4,7 @@ description = "Model fields are set by validation and read by serialisation; val
 when_imported = ["pydantic", "pydantic_settings"]
 
 [[fields_used]]
-inherits = ["pydantic.BaseModel", "pydantic.RootModel", "pydantic.v1.BaseModel", "pydantic_settings.BaseSettings"]
+inherits = ["pydantic.BaseModel", "pydantic.main.BaseModel", "pydantic.RootModel", "pydantic.root_model.RootModel", "pydantic.v1.BaseModel", "pydantic.BaseSettings", "pydantic.v1.BaseSettings", "pydantic_settings.BaseSettings"]
 fields = "annotated"
 
 [[fields_used]]
@@ -18,6 +18,17 @@ decorated_by = [
     "pydantic.field_serializer",
     "pydantic.model_serializer",
     "pydantic.computed_field",
+    "pydantic.validator",
+    "pydantic.root_validator",
+]
+
+# Validators and serializers are called by pydantic with a fixed signature.
+[[parameters_used]]
+decorated_by = [
+    "pydantic.field_validator",
+    "pydantic.model_validator",
+    "pydantic.field_serializer",
+    "pydantic.model_serializer",
     "pydantic.validator",
     "pydantic.root_validator",
 ]

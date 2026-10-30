@@ -8,7 +8,8 @@ changed files are scanned again. Both take the usual options and read
 
 A language server on stdin and stdout. Unused code shows as faded warnings
 across the workspace, updated as you type, with a quick fix that adds
-`# noqa: <code>`. Syntax errors are left to your other tools.
+`# noqa: <code>`. Each workspace folder is analysed as its own project.
+Syntax errors are left to your other tools.
 
 Neovim (0.11+):
 
@@ -44,10 +45,13 @@ $ condor query src/app.py      # whole-project analysis, findings in this file
 ```
 
 Output and exit status are those of `condor`. The first call starts a
-background daemon for the directory. Later calls ask it and take a fraction
-of a full scan (Django: 0.12 s instead of 0.27 s). The daemon exits after
-30 minutes without queries (`CONDOR_DAEMON_IDLE`, in seconds). If it cannot
-start, or on Windows, `condor query` scans in-process.
+background daemon for the directory. Later calls ask it and only rescan the
+files that changed, which takes about half the time of a full scan on a
+project the size of Django. A file is rescanned when its size, modification
+time or (on Linux and macOS) change time changes. A path that does not exist
+is an error. The daemon exits after 30 minutes without queries
+(`CONDOR_DAEMON_IDLE`, in seconds). If it cannot start, or on Windows,
+`condor query` scans in-process.
 
 A Claude Code hook that shows the agent the dead code in each Python file it
 edits (`.claude/settings.json`):

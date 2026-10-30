@@ -48,9 +48,9 @@ impl ItemKind {
 
     /// Parse a kind name (as in `--only`) or its noqa code.
     pub fn parse(s: &str) -> Option<ItemKind> {
-        let s = s.trim();
+        let s = s.trim().to_ascii_lowercase();
         ItemKind::ALL.into_iter().find(|k| {
-            k.as_str() == s || k.noqa_code().eq_ignore_ascii_case(s) || (s == "unreachable" && *k == ItemKind::UnreachableCode)
+            k.as_str() == s || k.noqa_code().eq_ignore_ascii_case(&s) || (s == "unreachable" && *k == ItemKind::UnreachableCode)
         })
     }
 
@@ -83,8 +83,6 @@ pub struct Item {
     pub confidence: u8,
     /// Language-defined role of the item for project-wide rules (0: none).
     pub tag: u8,
-    /// Language-defined context for `tag`, such as the enclosing class.
-    pub context: Option<String>,
 }
 
 impl Item {

@@ -6,6 +6,6 @@ when_imported = ["fastapi"]
 [[used]]
 decorated_by = [
     "*.get", "*.post", "*.put", "*.patch", "*.delete", "*.head", "*.options", "*.trace",
-    "*.api_route", "*.websocket",
+    "*.api_route", "*.route", "*.websocket", "*.websocket_route",
     "*.on_event", "*.middleware", "*.exception_handler",
 ]

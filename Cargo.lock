@@ -127,7 +127,7 @@ dependencies = [
 
 [[package]]
 name = "condor"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "condor_core",
  "condor_python",
@@ -143,7 +143,7 @@ dependencies = [
 
 [[package]]
 name = "condor_core"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "regex",
  "rustc-hash",
@@ -151,7 +151,7 @@ dependencies = [
 
 [[package]]
 name = "condor_python"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "condor_core",
  "encoding_rs",
@@ -168,7 +168,7 @@ dependencies = [
 
 [[package]]
 name = "condor_testapi"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "condor",
  "condor_core",

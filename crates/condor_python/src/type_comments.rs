@@ -44,12 +44,11 @@ fn parse(text: &str) -> Vec<Expr> {
     let Some((args, returns)) = text.trim().rsplit_once("->") else { return Vec::new() };
     let mut exprs = Vec::new();
     // `(a, *b, **c)` parses as the arguments of a call.
-    if let Ok(call) = ruff_python_parser::parse_expression(&format!("_{}", args.trim())) {
-        if let Expr::Call(call) = *call.into_syntax().body {
-            exprs.extend(call.arguments.args.into_iter());
+    if let Ok(call) = ruff_python_parser::parse_expression(&format!("_{}", args.trim()))
+        && let Expr::Call(call) = *call.into_syntax().body {
+            exprs.extend(call.arguments.args);
             exprs.extend(call.arguments.keywords.into_iter().map(|k| k.value));
         }
-    }
     if let Ok(ret) = ruff_python_parser::parse_expression(returns.trim()) {
         exprs.push(*ret.into_syntax().body);
     }

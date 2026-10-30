@@ -29,11 +29,19 @@ pub struct FileScan {
     pub functions: Vec<FunctionFacts>,
     /// Top-level names of the modules the file imports.
     pub imports: Vec<String>,
+    /// Imported names: local name -> dotted name it refers to (relative
+    /// imports keep their dots), for following re-exports.
+    pub aliases: Vec<(String, String)>,
+    /// The file has a star import, so names it uses may come from anywhere.
+    pub star_import: bool,
     /// String arguments of calls matching `ScanOptions::call_hints`, which
     /// count as names requested from a framework.
     pub requested: Vec<String>,
     /// Entries of a `--make-whitelist` file found in this file.
     pub whitelist_entries: Vec<WhitelistEntry>,
+    /// Every name the file defines, including those not reported (ignored,
+    /// `# noqa`, or used by a framework), for checking whitelist entries.
+    pub defined_names: Vec<String>,
     /// The scanned file.
     pub file: Option<std::sync::Arc<std::path::Path>>,
 }
@@ -48,16 +56,19 @@ pub struct ClassFacts {
     pub decorators: Vec<Decorator>,
     /// Index of the class's item in `FileScan::items`, if it was defined.
     pub item: Option<usize>,
-    /// The enclosing class, for nested classes.
-    pub class: Option<String>,
+    /// The enclosing class (index in `FileScan::classes`), for nested classes.
+    pub class: Option<usize>,
+    /// Items for the attributes its body defines that have a tag.
+    pub fields: Vec<usize>,
 }
 
 /// A function or method.
 #[derive(Clone, Debug, Default)]
 pub struct FunctionFacts {
     pub name: String,
-    /// The class whose body defines it, for methods.
-    pub class: Option<String>,
+    /// The class whose body defines it (index in `FileScan::classes`), for
+    /// methods.
+    pub class: Option<usize>,
     pub decorators: Vec<Decorator>,
     /// Index of the function's item in `FileScan::items`, if it was defined.
     pub item: Option<usize>,
@@ -71,6 +82,9 @@ pub struct FunctionFacts {
 pub struct Decorator {
     pub name: String,
     pub keywords: Vec<(String, String)>,
+    /// The decorator's first name comes from an import (`app` in
+    /// `from myapp import app; @app.route`), not from the file itself.
+    pub imported: bool,
 }
 
 /// A line written by `--make-whitelist`: `name  # unused <type> (<path>:<line>)`.
@@ -137,18 +151,46 @@ impl Analysis {
         if named.is_empty() {
             return;
         }
-        let shown = |p: &std::path::Path| crate::paths::format_path(p, cwd).to_string_lossy().into_owned();
-        let defined: FxHashSet<(String, String)> = self
+        let defined: FxHashSet<(&std::path::Path, &str)> = self
             .scans
             .iter()
-            .flat_map(|s| s.items.iter())
-            .filter(|i| named.contains(&i.name))
-            .map(|i| (shown(&i.file), i.name.clone()))
+            .filter_map(|s| s.file.as_deref().map(|f| (f, s)))
+            .flat_map(|(f, s)| s.defined_names.iter().filter(|n| named.contains(*n)).map(move |n| (f, n.as_str())))
             .collect();
-        let scanned: FxHashSet<String> = self.scans.iter().filter_map(|s| s.file.as_deref()).map(shown).collect();
-        for scan in &mut self.scans {
-            if let Some(file) = scan.file.clone() {
-                check_scan(scan, &file, &defined, &scanned);
+        let scanned: FxHashSet<&std::path::Path> = self.scans.iter().filter_map(|s| s.file.as_deref()).collect();
+        // Entry paths are as `--make-whitelist` wrote them: relative to the
+        // directory it ran in, which may be this one or the whitelist's.
+        let mut stale: Vec<(usize, WhitelistEntry)> = Vec::new();
+        for (index, scan) in self.scans.iter().enumerate() {
+            let Some(file) = scan.file.as_deref() else { continue };
+            let bases = [Some(cwd), file.parent()];
+            for entry in &scan.whitelist_entries {
+                let target = bases
+                    .iter()
+                    .flatten()
+                    .map(|base| crate::paths::resolve(std::path::Path::new(&entry.path), base))
+                    .find(|p| scanned.contains(p.as_path()));
+                if let Some(target) = target
+                    && !defined.contains(&(target.as_path(), entry.name.as_str())) {
+                        stale.push((index, entry.clone()));
+                    }
+            }
+        }
+        for (index, entry) in stale {
+            let scan = &mut self.scans[index];
+            let file = scan.file.clone().expect("checked above");
+            scan.items.push(Item {
+                name: entry.name.clone(),
+                kind: ItemKind::StaleWhitelistEntry,
+                file,
+                first_line: entry.line,
+                last_line: entry.line,
+                message: Some(format!("stale whitelist entry '{}': {} no longer defines it", entry.name, entry.path)),
+                confidence: 100,
+                tag: 0,
+            });
+            if let Some(pos) = scan.uses.iter().position(|u| *u == entry.name) {
+                scan.uses.remove(pos);
             }
         }
     }
@@ -180,35 +222,4 @@ impl Analysis {
 /// Python's `str.lower()` (full Unicode lowercase mapping, final-sigma aware).
 pub fn py_lower(s: &str) -> String {
     s.to_lowercase()
-}
-
-fn check_scan(
-    scan: &mut FileScan,
-    file: &std::sync::Arc<std::path::Path>,
-    defined: &FxHashSet<(String, String)>,
-    scanned: &FxHashSet<String>,
-) {
-    let mut stale_names = Vec::new();
-    for entry in &scan.whitelist_entries {
-        if !scanned.contains(&entry.path) || defined.contains(&(entry.path.clone(), entry.name.clone())) {
-            continue;
-        }
-        stale_names.push(entry.name.clone());
-        scan.items.push(Item {
-            name: entry.name.clone(),
-            kind: ItemKind::StaleWhitelistEntry,
-            file: file.clone(),
-            first_line: entry.line,
-            last_line: entry.line,
-            message: Some(format!("stale whitelist entry '{}': {} no longer defines it", entry.name, entry.path)),
-            confidence: 100,
-            tag: 0,
-            context: None,
-        });
-    }
-    for name in stale_names {
-        if let Some(pos) = scan.uses.iter().position(|u| *u == name) {
-            scan.uses.remove(pos);
-        }
-    }
 }

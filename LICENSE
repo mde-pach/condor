@@ -19,7 +19,3 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
-
-vulture's bundled whitelists (crates/condor_python/src/whitelists) and test
-suite (tests/upstream/vulture-2.16) are copyright Jendrik Seipp and licensed
-under the MIT License; see the LICENSE files next to them.

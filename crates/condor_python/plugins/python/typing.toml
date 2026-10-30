@@ -8,9 +8,10 @@ when_imported = ["typing", "typing_extensions"]
 inherits = ["typing.TypedDict", "typing.NamedTuple", "typing_extensions.TypedDict", "typing_extensions.NamedTuple"]
 fields = "annotated"
 
-# A protocol method only declares a signature.
+# A protocol method only declares a signature. Only classes listing Protocol
+# among their bases are protocols; their concrete subclasses are not.
 [[parameters_used]]
-in_classes_inheriting = ["typing.Protocol", "typing_extensions.Protocol"]
+in_classes_based_on = ["typing.Protocol", "typing_extensions.Protocol"]
 
 # Overloads declare signatures; overrides must keep the overridden one.
 [[parameters_used]]

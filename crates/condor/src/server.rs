@@ -1,7 +1,7 @@
 //! `condor server [OPTIONS] [PATHS]`: a language server over stdio. It shows
 //! the unused code of the whole workspace as warnings, updated as files are
 //! edited, and offers a `# noqa` quick fix. Options and paths are those of
-//! the command line; without paths, the workspace is scanned (`.`).
+//! the command line; without paths, each workspace folder is scanned (`.`).
 //!
 //! Syntax errors are left to other tools (ruff, the editor's Python support).
 
@@ -26,13 +26,50 @@ use crate::run::{self, Output};
 
 type Result<T> = std::result::Result<T, Box<dyn Error + Send + Sync>>;
 
+/// The largest message accepted from the editor.
+const MAX_MESSAGE: usize = 64 << 20;
+
 /// `condor server`: serve the editor on stdin and stdout.
-pub fn main(argv: &[String]) -> i32 {
-    let (connection, io_threads) = Connection::stdio();
-    let result = serve(&connection, argv);
+pub fn main(argv: &[String], cwd: &Path) -> i32 {
+    // The options are the command line's: check them (and answer `--help`)
+    // before talking to an editor.
+    if let Err(exit) = args::parse(argv) {
+        print!("{}", exit.stdout);
+        eprint!("{}", exit.stderr);
+        return exit.code;
+    }
+    let (connection, Connection { sender: to_server, receiver: from_server }) = Connection::memory();
+    std::thread::spawn(move || {
+        let mut stdin = std::io::stdin().lock();
+        // Ends on end of input or a malformed message; the server then
+        // sees the connection close.
+        loop {
+            match read_message(&mut stdin) {
+                Ok(Some(message)) => {
+                    if to_server.send(message).is_err() {
+                        break;
+                    }
+                }
+                Ok(None) => break,
+                Err(e) => {
+                    eprintln!("condor server: {e}");
+                    break;
+                }
+            }
+        }
+    });
+    let writer = std::thread::spawn(move || {
+        let mut stdout = std::io::stdout().lock();
+        for message in from_server {
+            if message.write(&mut stdout).is_err() {
+                break;
+            }
+        }
+    });
+    let result = serve(&connection, argv, cwd);
     drop(connection);
-    let joined = io_threads.join();
-    match result.and(joined.map_err(Into::into)) {
+    let _ = writer.join();
+    match result {
         Ok(()) => 0,
         Err(e) => {
             eprintln!("condor server: {e}");
@@ -41,15 +78,51 @@ pub fn main(argv: &[String]) -> i32 {
     }
 }
 
-fn serve(connection: &Connection, argv: &[String]) -> Result<()> {
-    let (id, params) = connection.initialize_start()?;
+/// One message in LSP framing (`Content-Length` header, blank line, JSON
+/// body), refusing bodies over [`MAX_MESSAGE`]. `None` at end of input.
+fn read_message(input: &mut impl std::io::BufRead) -> std::io::Result<Option<Message>> {
+    let invalid = |msg: String| std::io::Error::new(std::io::ErrorKind::InvalidData, msg);
+    let mut length: Option<usize> = None;
+    loop {
+        let mut header = String::new();
+        if input.read_line(&mut header)? == 0 {
+            return Ok(None);
+        }
+        let header = header.trim_end();
+        if header.is_empty() {
+            break;
+        }
+        if let Some((name, value)) = header.split_once(':')
+            && name.eq_ignore_ascii_case("content-length") {
+                length = Some(value.trim().parse().map_err(|_| invalid(format!("bad header: {header}")))?);
+            }
+    }
+    let length = length.ok_or_else(|| invalid("missing Content-Length".into()))?;
+    if length > MAX_MESSAGE {
+        return Err(invalid(format!("message of {length} bytes is too large")));
+    }
+    let mut body = vec![0; length];
+    input.read_exact(&mut body)?;
+    serde_json::from_slice(&body).map(Some).map_err(|e| invalid(e.to_string()))
+}
+
+fn serve(connection: &Connection, argv: &[String], cwd: &Path) -> Result<()> {
+    let (id, params) = match connection.initialize_start() {
+        Ok(start) => start,
+        // The editor left before starting.
+        Err(e) if e.channel_is_disconnected() => return Ok(()),
+        Err(e) => return Err(e.into()),
+    };
     let init: InitializeParams = serde_json::from_value(params)?;
     #[allow(deprecated)] // root_uri: still sent by clients without workspace folders
-    let root_uri = init.workspace_folders.as_ref().and_then(|f| f.first()).map(|f| f.uri.clone()).or(init.root_uri);
-    let root = match root_uri.as_ref().and_then(uri_to_path) {
-        Some(root) => root,
-        None => std::env::current_dir()?,
+    let uris: Vec<Uri> = match &init.workspace_folders {
+        Some(folders) if !folders.is_empty() => folders.iter().map(|f| f.uri.clone()).collect(),
+        _ => init.root_uri.iter().cloned().collect(),
     };
+    let mut roots: Vec<PathBuf> = uris.iter().filter_map(uri_to_path).collect();
+    if roots.is_empty() {
+        roots.push(cwd.to_path_buf());
+    }
     connection.initialize_finish(
         id,
         json!({
@@ -77,17 +150,36 @@ fn serve(connection: &Connection, argv: &[String]) -> Result<()> {
         connection.sender.send(request.into())?;
     }
 
-    let mut server = Server::new(root, argv.to_vec());
+    // The connection hands over one message at a time; queue them all so
+    // that edits made during an analysis are handled together.
+    let (sender, messages) = std::sync::mpsc::channel();
+    let receiver = connection.receiver.clone();
+    std::thread::spawn(move || {
+        for message in receiver {
+            if sender.send(message).is_err() {
+                break;
+            }
+        }
+    });
+
+    let mut server = Server::new(roots, argv.to_vec());
     server.update(connection)?;
-    while let Ok(first) = connection.receiver.recv() {
-        // Handle everything already queued before analysing again.
+    while let Ok(first) = messages.recv() {
         let mut dirty = false;
-        for message in std::iter::once(first).chain(connection.receiver.try_iter().collect::<Vec<_>>()) {
+        let batch: Vec<Message> = std::iter::once(first).chain(messages.try_iter()).collect();
+        for message in batch {
             match message {
-                Message::Request(request) => {
-                    if connection.handle_shutdown(&request)? {
-                        return Ok(());
+                Message::Request(request) if request.method == "shutdown" => {
+                    connection.sender.send(Response::new_ok(request.id, ()).into())?;
+                    // Only `exit` may follow.
+                    for message in messages.iter() {
+                        if matches!(&message, Message::Notification(n) if n.method == "exit") {
+                            return Ok(());
+                        }
                     }
+                    return Ok(());
+                }
+                Message::Request(request) => {
                     if dirty {
                         server.update(connection)?;
                         dirty = false;
@@ -95,6 +187,7 @@ fn serve(connection: &Connection, argv: &[String]) -> Result<()> {
                     let response = server.request(request);
                     connection.sender.send(response.into())?;
                 }
+                Message::Notification(n) if n.method == "exit" => return Ok(()),
                 Message::Notification(notification) => dirty |= server.notify(notification),
                 Message::Response(_) => {}
             }
@@ -106,78 +199,103 @@ fn serve(connection: &Connection, argv: &[String]) -> Result<()> {
     Ok(())
 }
 
-struct Server {
+/// A workspace folder, analysed as one project.
+struct Folder {
     root: PathBuf,
     /// `root` with symbolic links resolved, as in the analysed paths.
     real_root: PathBuf,
-    argv: Vec<String>,
     engine: Option<Engine>,
-    /// Open documents: their URI as the editor names them, and their text.
-    documents: HashMap<PathBuf, (Uri, String)>,
-    published: HashMap<PathBuf, Vec<Diagnostic>>,
+    /// The configuration error last shown.
     error: Option<String>,
 }
 
+struct Server {
+    folders: Vec<Folder>,
+    argv: Vec<String>,
+    /// Open documents: their URI as the editor names them, and their text.
+    documents: HashMap<PathBuf, (Uri, String)>,
+    published: HashMap<PathBuf, Vec<Diagnostic>>,
+    /// Files may have been added or removed on disk.
+    rediscover: bool,
+}
+
 impl Server {
-    fn new(root: PathBuf, argv: Vec<String>) -> Server {
-        let real_root = resolve(&root, &root);
-        Server { root, real_root, argv, engine: None, documents: HashMap::new(), published: HashMap::new(), error: None }
+    fn new(roots: Vec<PathBuf>, argv: Vec<String>) -> Server {
+        let folders = roots
+            .into_iter()
+            .map(|root| Folder { real_root: resolve(&root, &root), root, engine: None, error: None })
+            .collect();
+        Server { folders, argv, documents: HashMap::new(), published: HashMap::new(), rediscover: true }
     }
 
-    fn config(&self) -> std::result::Result<Config, String> {
+    /// The innermost folder containing `path`, which owns its diagnostics.
+    fn owner(&self, path: &Path) -> Option<usize> {
+        (0..self.folders.len())
+            .filter(|&i| path.starts_with(&self.folders[i].real_root))
+            .max_by_key(|&i| self.folders[i].real_root.components().count())
+    }
+
+    fn config(&self, root: &Path) -> std::result::Result<Config, String> {
         let mut cli = args::parse(&self.argv).map_err(|e| e.stderr.trim().to_string())?;
         cli.default_paths = vec![".".into()];
-        match config::make_config(cli, &self.root, None) {
+        match config::make_config(cli, root, None) {
             Outcome::Config(config, _) => Ok(config),
             Outcome::InputError(msg, _) => Err(msg),
             Outcome::Exit(exit) => Err(exit.stderr.trim().to_string()),
         }
     }
 
-    /// Bring the engine up to date with the configuration and the files.
-    fn engine(&mut self) -> std::result::Result<&mut Engine, String> {
-        let config = self.config()?;
-        let stale = self.engine.as_ref().is_none_or(|e| e.config != config || e.plugins_changed());
+    /// Bring folder `i`'s engine up to date with its configuration and files.
+    fn refresh(&mut self, i: usize) -> std::result::Result<(), String> {
+        let config = self.config(&self.folders[i].root)?;
+        let folder = &mut self.folders[i];
+        let stale = folder.engine.as_ref().is_none_or(|e| e.config != config || e.plugins_changed());
         if stale {
-            let mut engine = Engine::new(config, &self.root)?;
+            let mut engine = Engine::new(config, &folder.root)?;
             for (path, (_, text)) in &self.documents {
                 engine.set_overlay(path.clone(), Some(text.clone()));
             }
-            self.engine = Some(engine);
+            folder.engine = Some(engine);
         }
-        let engine = self.engine.as_mut().expect("set above");
-        engine.refresh()?;
-        Ok(engine)
+        folder.engine.as_mut().expect("set above").refresh(self.rediscover)
     }
 
     /// Analyse and publish the diagnostics that changed.
     fn update(&mut self, connection: &Connection) -> Result<()> {
         let mut diagnostics: HashMap<PathBuf, Vec<Diagnostic>> = HashMap::new();
-        match self.engine() {
-            Ok(engine) => {
-                let analysis = engine.analyze(&mut Output::default(), false).unwrap_or_default();
-                let (config, cwd) = (&engine.config, &engine.cwd);
-                let mut lines: HashMap<PathBuf, Vec<String>> = HashMap::new();
-                for item in run::select(&analysis, config, cwd) {
-                    let path = item.file.to_path_buf();
-                    let text = lines.entry(path.clone()).or_insert_with(|| {
-                        let text = engine.overlay(&path).map(String::from).or_else(|| std::fs::read_to_string(&path).ok());
-                        text.unwrap_or_default().lines().map(String::from).collect()
-                    });
-                    diagnostics.entry(path).or_default().push(diagnostic(item, text));
-                }
-                self.error = None;
-            }
-            Err(msg) => {
-                // Shown once; the previous diagnostics stay until it is fixed.
-                if self.error.as_ref() != Some(&msg) {
+        let mut lines: HashMap<PathBuf, Vec<String>> = HashMap::new();
+        for i in 0..self.folders.len() {
+            if let Err(msg) = self.refresh(i) {
+                // Shown once; the folder's diagnostics stay until it is fixed.
+                if self.folders[i].error.as_ref() != Some(&msg) {
                     let params = json!({"type": 1, "message": format!("condor: {msg}")});
                     connection.sender.send(Notification::new("window/showMessage".into(), params).into())?;
-                    self.error = Some(msg);
+                    self.folders[i].error = Some(msg);
                 }
-                return Ok(());
+                for (path, diags) in &self.published {
+                    if self.owner(path) == Some(i) {
+                        diagnostics.insert(path.clone(), diags.clone());
+                    }
+                }
+                continue;
+            }
+            self.folders[i].error = None;
+            let engine = self.folders[i].engine.as_mut().expect("refreshed");
+            let analysis = engine.analyze(&mut Output::default(), false).unwrap_or_default();
+            let engine = self.folders[i].engine.as_ref().expect("refreshed");
+            for item in run::select(&analysis, &engine.config, &engine.cwd) {
+                let path = item.file.to_path_buf();
+                if self.owner(&path).is_some_and(|o| o != i) {
+                    continue;
+                }
+                let text = lines.entry(path.clone()).or_insert_with(|| {
+                    let text = engine.overlay(&path).map(String::from).or_else(|| std::fs::read_to_string(&path).ok());
+                    lsp_lines(&text.unwrap_or_default()).into_iter().map(String::from).collect()
+                });
+                diagnostics.entry(path).or_default().push(diagnostic(item, text));
             }
         }
+        self.rediscover = false;
         let cleared: Vec<PathBuf> = self.published.keys().filter(|p| !diagnostics.contains_key(*p)).cloned().collect();
         for path in cleared {
             self.publish(connection, &path, Vec::new())?;
@@ -205,13 +323,14 @@ impl Server {
         Ok(())
     }
 
-    /// An analysed path as the editor knows it (below the workspace root as
-    /// opened, not its resolved form).
+    /// An analysed path as the editor knows it (below the workspace folder
+    /// as opened, not its resolved form).
     fn shown(&self, path: &Path) -> PathBuf {
-        match path.strip_prefix(&self.real_root) {
-            Ok(rel) => self.root.join(rel),
-            Err(_) => path.to_path_buf(),
-        }
+        if let Some(folder) = self.owner(path).map(|i| &self.folders[i])
+            && let Ok(rel) = path.strip_prefix(&folder.real_root) {
+                return folder.root.join(rel);
+            }
+        path.to_path_buf()
     }
 
     /// Handle a notification; `true` if the analysis must be updated.
@@ -231,14 +350,17 @@ impl Server {
                 let Ok(p) = serde_json::from_value::<DidCloseTextDocumentParams>(notification.params) else { return false };
                 self.set_document(p.text_document.uri, None)
             }
-            "textDocument/didSave" | "workspace/didChangeWatchedFiles" => true,
+            "textDocument/didSave" | "workspace/didChangeWatchedFiles" => {
+                self.rediscover = true;
+                true
+            }
             _ => false,
         }
     }
 
     fn set_document(&mut self, uri: Uri, text: Option<String>) -> bool {
         let Some(path) = uri_to_path(&uri) else { return false };
-        let path = resolve(&path, &self.root);
+        let path = resolve(&path, Path::new("/"));
         match &text {
             Some(text) => {
                 self.documents.insert(path.clone(), (uri, text.clone()));
@@ -247,8 +369,10 @@ impl Server {
                 self.documents.remove(&path);
             }
         }
-        if let Some(engine) = &mut self.engine {
-            engine.set_overlay(path, text);
+        for folder in &mut self.folders {
+            if let Some(engine) = &mut folder.engine {
+                engine.set_overlay(path.clone(), text.clone());
+            }
         }
         true
     }
@@ -261,18 +385,19 @@ impl Server {
             return Response::new_err(request.id, lsp_server::ErrorCode::InvalidParams as i32, "invalid".into());
         };
         let actions = uri_to_path(&params.text_document.uri)
-            .map(|path| self.code_actions(&params, &resolve(&path, &self.root)))
+            .map(|path| self.code_actions(&params, &resolve(&path, Path::new("/"))))
             .unwrap_or_default();
         Response::new_ok(request.id, actions)
     }
 
-    /// `# noqa: <code>` on the line of each condor diagnostic in range.
+    /// `# noqa: <code>` on the line of each condor diagnostic in range, or
+    /// the code added to the line's `# noqa: <codes>`.
     fn code_actions(&self, params: &CodeActionParams, path: &Path) -> Vec<CodeActionOrCommand> {
         let text = match self.documents.get(path) {
             Some((_, text)) => text.clone(),
             None => std::fs::read_to_string(path).unwrap_or_default(),
         };
-        let lines: Vec<&str> = text.lines().collect();
+        let lines = lsp_lines(&text);
         let mut actions = Vec::new();
         for diag in &params.context.diagnostics {
             let Some(NumberOrString::String(code)) = &diag.code else { continue };
@@ -281,11 +406,19 @@ impl Server {
             }
             let line = diag.range.start.line;
             let Some(text) = lines.get(line as usize) else { continue };
-            if condor_python::noqa::search(text).is_some() {
-                continue;
-            }
-            let end = Position::new(line, utf16_len(text));
-            let edit = TextEdit::new(Range::new(end, end), format!("  # noqa: {code}"));
+            let (at, new_text) = match condor_python::noqa::search(text) {
+                // A bare `# noqa` already ignores everything.
+                Some(None) => continue,
+                Some(Some(codes)) => {
+                    let start = codes.as_ptr() as usize - text.as_ptr() as usize;
+                    let end = start + codes.trim_end_matches([',', ' ', '\t']).len();
+                    (utf16_len(&text[..end]), format!(",{code}"))
+                }
+                None => (utf16_len(text), format!("  # noqa: {code}")),
+            };
+            let at = Position::new(line, at);
+            let edit = TextEdit::new(Range::new(at, at), new_text);
+            #[allow(clippy::mutable_key_type)] // lsp-types keys edits by `Uri`
             let changes = HashMap::from([(params.text_document.uri.clone(), vec![edit])]);
             actions.push(CodeActionOrCommand::CodeAction(CodeAction {
                 title: format!("Ignore with `# noqa: {code}`"),
@@ -299,6 +432,19 @@ impl Server {
     }
 }
 
+/// Lines as LSP counts them: separated by `\n`, `\r\n` or `\r`.
+fn lsp_lines(text: &str) -> Vec<&str> {
+    let mut lines = Vec::new();
+    let mut rest = text;
+    while let Some(i) = rest.find(['\n', '\r']) {
+        lines.push(&rest[..i]);
+        let skip = if rest[i..].starts_with("\r\n") { 2 } else { 1 };
+        rest = &rest[i + skip..];
+    }
+    lines.push(rest);
+    lines
+}
+
 fn utf16_len(s: &str) -> u32 {
     s.encode_utf16().count() as u32
 }
@@ -308,7 +454,7 @@ fn utf16_len(s: &str) -> u32 {
 fn diagnostic(item: &Item, lines: &[String]) -> Diagnostic {
     let first = item.first_line.saturating_sub(1);
     let last = if item.kind == condor_core::ItemKind::UnreachableCode { item.last_line.saturating_sub(1) } else { first };
-    let line = |n: u32| lines.get(n as usize).map_or("", |l| l.trim_end_matches('\r'));
+    let line = |n: u32| lines.get(n as usize).map_or("", String::as_str);
     let first_text = line(first);
     let indent = first_text.len() - first_text.trim_start().len();
     Diagnostic {

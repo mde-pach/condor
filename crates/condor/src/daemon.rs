@@ -48,7 +48,11 @@ fn fnv1a(parts: &[&[u8]]) -> u64 {
 pub fn socket_path(cwd: &Path) -> Option<PathBuf> {
     // SAFETY: getuid has no preconditions and cannot fail.
     let uid = unsafe { libc::getuid() };
-    let base = std::env::var_os("XDG_RUNTIME_DIR").map(PathBuf::from).unwrap_or_else(std::env::temp_dir);
+    // An empty or relative XDG_RUNTIME_DIR is invalid and ignored (XDG spec).
+    let base = std::env::var_os("XDG_RUNTIME_DIR")
+        .map(PathBuf::from)
+        .filter(|p| p.is_absolute())
+        .unwrap_or_else(std::env::temp_dir);
     let dir = base.join(format!("condor-{uid}"));
     match std::fs::DirBuilder::new().mode(0o700).create(&dir) {
         Ok(()) => {}
@@ -80,6 +84,7 @@ fn idle_timeout() -> Duration {
 
 /// Send one request and read the answer.
 fn request(stream: UnixStream, body: &Value) -> Option<Value> {
+    stream.set_write_timeout(Some(Duration::from_secs(5))).ok()?;
     stream.set_read_timeout(Some(Duration::from_secs(600))).ok()?;
     let mut writer = &stream;
     writer.write_all(format!("{body}\n").as_bytes()).ok()?;
@@ -132,8 +137,13 @@ pub fn main(cwd: &Path) -> i32 {
     let listener = match UnixListener::bind(&path) {
         Ok(listener) => listener,
         Err(e) if e.kind() == std::io::ErrorKind::AddrInUse => {
-            if UnixStream::connect(&path).is_ok() {
-                return 0; // Another daemon already serves this directory.
+            // Another daemon serves this directory, or is binding it right
+            // now; otherwise the socket is left over from a crash.
+            for _ in 0..5 {
+                if UnixStream::connect(&path).is_ok() {
+                    return 0;
+                }
+                std::thread::sleep(Duration::from_millis(20));
             }
             let _ = std::fs::remove_file(&path);
             match UnixListener::bind(&path) {
@@ -181,6 +191,9 @@ pub fn main(cwd: &Path) -> i32 {
 
 /// Answer one connection; `true` asks the daemon to stop.
 fn serve(stream: &UnixStream, engines: &mut Engines, cwd: &Path) -> bool {
+    // A client that stalls must not block the others.
+    let _ = stream.set_read_timeout(Some(Duration::from_secs(2)));
+    let _ = stream.set_write_timeout(Some(Duration::from_secs(30)));
     let mut line = String::new();
     if BufReader::new(stream).read_line(&mut line).is_err() {
         return false;

@@ -1,0 +1,143 @@
+"""Why condor does not report what vulture reports, finding by finding, and
+what condor reports that vulture does not.
+
+For each project in corpus.toml, with default options, every finding only
+vulture reports is attributed to the plugin rule that removes it (asked of
+condor_testapi), to .gitignore (I9) or to a built-in rule. Each reason gets
+a count and a seeded sample with the source line and its class, to review
+that the rule only drops code that is used.
+
+Usage (from the repository root, after `cargo build --release` and
+`python harness/difftest.py`, which clones the corpus):
+
+    uv run --python 3.14 python harness/drops.py [--only NAME ...] [--sample N]
+
+Writes harness/DROPS.md and target/drops.json.
+"""
+
+import argparse
+import collections
+import concurrent.futures
+import json
+import random
+import re
+import subprocess
+import sys
+import tomllib
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from plant import CONDOR, HERE, ROOT, VULTURE, condor_ignored, explain_drops, source_root  # noqa: E402
+
+FINDING = re.compile(r"^(.*?):(\d+): (unused \w+|unreachable code)[^']*'(.*)' \((\d+)% confidence")
+
+
+def findings(cmd, cwd):
+    out = subprocess.run(cmd, cwd=cwd, capture_output=True).stdout.decode("utf-8", "replace")
+    found = {}
+    for line in out.splitlines():
+        m = FINDING.match(line)
+        if m:
+            found[(m[1], int(m[2]), m[4])] = (m[3], line)
+    return found
+
+
+def context(cwd, path, line):
+    """The finding's line and the header of the class around it."""
+    try:
+        lines = (cwd / path).read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
+        return "", ""
+    if not 0 < line <= len(lines):
+        return "", ""
+    text = lines[line - 1].strip()
+    # Walk up through enclosing blocks: each is the first line above that
+    # is less indented than everything seen since.
+    current = len(lines[line - 1]) - len(lines[line - 1].lstrip())
+    for s in reversed(lines[: line - 1]):
+        stripped = s.lstrip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        indent = len(s) - len(stripped)
+        if indent < current:
+            if stripped.startswith("class "):
+                return text, stripped
+            current = indent
+            if current == 0:
+                break
+    return text, ""
+
+
+def run_project(project):
+    cwd = source_root(project)
+    if cwd is None or not cwd.exists():
+        return None
+    # condor prints resolved paths (the stdlib is often behind a symlink).
+    cwd = cwd.resolve()
+    paths = project.get("paths", ["."])
+    flags = ["--exclude", "site-packages"] if project.get("local") == "python3.14-stdlib" else []
+    vulture = findings([*VULTURE, *flags, *paths], cwd)
+    condor = findings([str(CONDOR), *flags, *paths], cwd)
+    rules = {(r["path"], r["line"], r["name"]): r["rule"] for r in explain_drops(cwd, [*flags, *paths])}
+    ignored = condor_ignored(cwd, paths)
+    drops = []
+    for key, (kind, line) in vulture.items():
+        if key in condor:
+            continue
+        path, lineno, name = key
+        if key in rules:
+            why = f"plugin {rules[key]}"
+        elif path.removeprefix("./") in ignored:
+            why = "file skipped by .gitignore (I9)"
+        else:
+            why = f"built in ({kind})"
+        text, cls = context(cwd, path, lineno)
+        drops.append({"project": project["name"], "path": path, "line": lineno, "name": name,
+                      "kind": kind, "why": why, "text": text, "class": cls, "finding": line})
+    for key, (kind, line) in condor.items():
+        if key in vulture:
+            continue
+        path, lineno, name = key
+        text, cls = context(cwd, path, lineno)
+        drops.append({"project": project["name"], "path": path, "line": lineno, "name": name,
+                      "kind": kind, "why": f"only condor reports ({kind})", "text": text, "class": cls, "finding": line})
+    return drops
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--only", nargs="*")
+    parser.add_argument("--sample", type=int, default=12)
+    parser.add_argument("--jobs", type=int, default=4)
+    args = parser.parse_args()
+    corpus = tomllib.loads((HERE / "corpus.toml").read_text())
+    projects = [p for p in corpus["project"] if not args.only or p["name"] in args.only]
+    drops = []
+    with concurrent.futures.ThreadPoolExecutor(args.jobs) as pool:
+        for r in pool.map(run_project, projects):
+            if r is not None:
+                drops += r
+    (ROOT / "target").mkdir(exist_ok=True)
+    (ROOT / "target" / "drops.json").write_text(json.dumps(drops, indent=1))
+    by_why = collections.defaultdict(list)
+    for d in drops:
+        by_why[d["why"]].append(d)
+    lines = ["# Findings that differ from vulture, by reason", "",
+             "Generated by `harness/drops.py` (default options). Samples are seeded.", "",
+             "| Reason | Findings | Projects |", "|---|---:|---|"]
+    for why, items in sorted(by_why.items(), key=lambda x: -len(x[1])):
+        projects = collections.Counter(d["project"] for d in items)
+        shown = ", ".join(f"{p} {n}" for p, n in projects.most_common(4))
+        lines.append(f"| {why} | {len(items):,} | {shown} |")
+    rng = random.Random(0)
+    for why, items in sorted(by_why.items(), key=lambda x: -len(x[1])):
+        lines += ["", f"## {why} ({len(items):,})", ""]
+        for d in rng.sample(items, min(args.sample, len(items))):
+            cls = f" — in `{d['class']}`" if d["class"] else ""
+            lines.append(f"- {d['project']}/{d['path'].removeprefix('./')}:{d['line']} {d['kind']} `{d['name']}`: `{d['text'][:90]}`{cls}")
+    (HERE / "DROPS.md").write_text("\n".join(lines) + "\n")
+    print(f"{len(drops)} findings differ; see harness/DROPS.md")
+
+
+if __name__ == "__main__":
+    main()

@@ -25,7 +25,7 @@ use rustc_hash::FxHashSet;
 use crate::format_string;
 use crate::literal;
 use crate::noqa::NoqaLines;
-use crate::rules::{self, TAG_CLASS_ATTR, TAG_FIELD};
+use crate::rules::{self, TAG_CLASS_ATTR, TAG_CLASS_ATTR_CALL, TAG_FIELD};
 use crate::type_comments;
 
 const DEFAULT_CONFIDENCE: u8 = 60;
@@ -86,8 +86,11 @@ pub fn scan(source: &str, path: Arc<Path>, opts: &ScanOptions) -> FileScan {
 
     let resolved = resolve(&path, &opts.cwd);
     out.file = Some(path.clone());
-    let (aliases, modules) = rules::collect_imports(&module.body);
+    let (aliases, modules, star_import) = rules::collect_imports(&module.body);
     out.imports = modules;
+    out.aliases = aliases.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
+    out.aliases.sort_unstable();
+    out.star_import = star_import;
     let mut s = Scanner {
         source: &source,
         idx: &idx,
@@ -138,8 +141,8 @@ struct Scanner<'a> {
     scopes: Vec<Scope>,
     /// The class whose body statements are being visited directly.
     class_body: Option<ClassBody>,
-    /// Tag and context for the next definition (class fields).
-    pending_tag: Option<(u8, String)>,
+    /// Tag for the next definition (class fields), and its class's index.
+    pending_tag: Option<(u8, usize)>,
     /// While visiting a function's parameters: why they are not definitions.
     skip_params: Option<SkipParams>,
     /// Local name -> dotted name it was imported as.
@@ -162,7 +165,8 @@ struct Scope {
 
 #[derive(Clone)]
 struct ClassBody {
-    name: String,
+    /// Index in `out.classes`.
+    index: usize,
 }
 
 /// Why a function's parameters are not reported.
@@ -259,6 +263,9 @@ impl<'a> Scanner<'a> {
         confidence: u8,
         ignore: Ignore,
     ) -> Option<usize> {
+        if kind != ItemKind::UnreachableCode {
+            self.out.defined_names.push(name.to_string());
+        }
         let ignored = self.ignored_by(ignore, name)
             || self.opts.ignore_names.matches_case(name)
             || self.noqa.ignores(first_line, kind.noqa_code());
@@ -268,7 +275,10 @@ impl<'a> Scanner<'a> {
             return None;
         }
         self.log(format!("define {} \"{name}\"", kind.as_str()));
-        let (tag, context) = self.pending_tag.take().unzip();
+        let (tag, class) = self.pending_tag.take().unzip();
+        if let Some(class) = class {
+            self.out.classes[class].fields.push(self.out.items.len());
+        }
         self.out.items.push(Item {
             name: name.to_string(),
             kind,
@@ -278,7 +288,6 @@ impl<'a> Scanner<'a> {
             message,
             confidence,
             tag: tag.unwrap_or(0),
-            context,
         });
         Some(self.out.items.len() - 1)
     }
@@ -320,7 +329,9 @@ impl<'a> Scanner<'a> {
                         }
                     }
                 }
-                Decorator { name: self.resolve_name(name.trim_start_matches('@')), keywords }
+                let written = name.trim_start_matches('@');
+                let first = written.split('.').next().unwrap_or(written);
+                Decorator { name: self.resolve_name(written), keywords, imported: self.aliases.contains_key(first) }
             })
             .collect()
     }
@@ -424,7 +435,7 @@ impl<'a> Scanner<'a> {
                 let rest = &stmts[i + 1..];
                 // `raise NotImplementedError` followed by a bare `yield` is how
                 // an abstract method is made a generator.
-                if !rest.is_empty() && rest.iter().all(|s| is_bare_yield(*s)) {
+                if is_not_implemented(stmt) && !rest.is_empty() && rest.iter().all(|s| is_bare_yield(*s)) {
                     return false;
                 }
                 if let Some(&next) = stmts.get(i + 1) {
@@ -493,12 +504,11 @@ impl<'a> Scanner<'a> {
 
     fn reach_try(&mut self, stmt: &'a Stmt, body: &'a [Stmt], handlers: &'a [ExceptHandler], orelse: &'a [Stmt]) {
         let try_can = self.statements_can_fall_through(&Self::refs(body));
-        if !try_can {
-            if let (Some(first), Some(last)) = (orelse.first(), orelse.last()) {
+        if !try_can
+            && let (Some(first), Some(last)) = (orelse.first(), orelse.last()) {
                 let (f, l) = (self.stmt_first_line(StmtRef::Stmt(first)), self.end_line(last));
                 self.report_unreachable("else", f, l, "unreachable 'else' block".into());
             }
-        }
         // `any()` stops at the first handler that can fall through.
         let mut any_except = false;
         for ExceptHandler::ExceptHandler(h) in handlers {
@@ -526,10 +536,7 @@ impl<'a> Scanner<'a> {
     }
 
     fn visit_opt(&mut self, e: Option<&'a Expr>) {
-        match e {
-            Some(e) => self.visit_expr(e),
-            None => {}
-        }
+        if let Some(e) = e { self.visit_expr(e) }
     }
 
     fn visit_stmt(&mut self, stmt: &'a Stmt) {
@@ -538,7 +545,7 @@ impl<'a> Scanner<'a> {
             Stmt::FunctionDef(f) => {
                 let facts = FunctionFacts {
                     name: f.name.to_string(),
-                    class: self.class_body.as_ref().map(|c| c.name.clone()),
+                    class: self.class_body.as_ref().map(|c| c.index),
                     decorators: self.decorator_facts(&f.decorator_list),
                     item: None,
                     params: Vec::new(),
@@ -564,6 +571,10 @@ impl<'a> Scanner<'a> {
                 self.visit_type_params(f.type_params.as_deref());
                 self.statements_can_fall_through(&Self::refs(&f.body));
                 self.out.functions[index].item = self.handle_function_def(stmt, f);
+                // Python calls a module's `__getattr__` and `__dir__` (PEP 562).
+                if self.scopes.is_empty() && self.class_body.is_none() && matches!(f.name.as_str(), "__getattr__" | "__dir__") {
+                    self.use_name(f.name.as_str());
+                }
             }
             Stmt::ClassDef(c) => {
                 if let Some(args) = &c.arguments {
@@ -581,7 +592,12 @@ impl<'a> Scanner<'a> {
                     .filter_map(dotted_name)
                     .map(|b| self.resolve_name(&b))
                     .collect();
-                let outer = self.class_body.replace(ClassBody { name: c.name.to_string() });
+                // The class's index is reserved now, so its methods and fields
+                // can refer to it.
+                let class = self.class_body.as_ref().map(|b| b.index);
+                let index = self.out.classes.len();
+                self.out.classes.push(ClassFacts { name: c.name.to_string(), bases, class, ..ClassFacts::default() });
+                let outer = self.class_body.replace(ClassBody { index });
                 let shadowed = rules::binds_name(&c.body, None, c.name.as_str());
                 self.scopes.push(Scope { name: c.name.to_string(), is_class: true, is_method: false, shadowed });
                 self.visit_body(&c.body);
@@ -591,10 +607,8 @@ impl<'a> Scanner<'a> {
                     self.visit_expr(&d.expression);
                 }
                 self.visit_type_params(c.type_params.as_deref());
-                let decorators = self.decorator_facts(&c.decorator_list);
-                let item = self.handle_class_def(stmt, c);
-                let class = self.class_body.as_ref().map(|b| b.name.clone());
-                self.out.classes.push(ClassFacts { name: c.name.to_string(), bases, decorators, item, class });
+                self.out.classes[index].decorators = self.decorator_facts(&c.decorator_list);
+                self.out.classes[index].item = self.handle_class_def(stmt, c);
             }
             Stmt::Return(r) => {
                 self.visit_opt(r.value.as_deref());
@@ -602,8 +616,9 @@ impl<'a> Scanner<'a> {
             }
             Stmt::Delete(d) => d.targets.iter().for_each(|t| self.visit_expr(t)),
             Stmt::Assign(a) => {
+                let tag = if matches!(&*a.value, Expr::Call(_)) { TAG_CLASS_ATTR_CALL } else { TAG_CLASS_ATTR };
                 for t in &a.targets {
-                    self.tag_class_attribute(t, TAG_CLASS_ATTR);
+                    self.tag_class_attribute(t, tag);
                     self.visit_expr(t);
                     self.pending_tag = None;
                 }
@@ -620,7 +635,10 @@ impl<'a> Scanner<'a> {
                 self.visit_expr(&a.value);
             }
             Stmt::AnnAssign(a) => {
-                self.tag_class_attribute(&a.target, TAG_FIELD);
+                // A `ClassVar` is a class variable, not a field.
+                if !self.is_class_var(&a.annotation) {
+                    self.tag_class_attribute(&a.target, TAG_FIELD);
+                }
                 self.visit_expr(&a.target);
                 self.pending_tag = None;
                 self.visit_expr(&a.annotation);
@@ -766,6 +784,7 @@ impl<'a> Scanner<'a> {
         self.visit_opt(p.annotation.as_deref());
         let item = match self.skip_params {
             Some(SkipParams::Stub) => {
+                self.out.defined_names.push(p.name.to_string());
                 self.log(format!("Ignoring variable \"{}\" (stub parameter)", p.name));
                 None
             }
@@ -1042,54 +1061,62 @@ impl<'a> Scanner<'a> {
     /// `"%(my_var)s" % locals()`. vulture adds these with `|=`, which bypasses
     /// its verbose logging.
     fn handle_bin_op(&mut self, b: &ruff_python_ast::ExprBinOp) {
-        if let Expr::StringLiteral(s) = &*b.left {
-            if b.op == Operator::Mod && is_locals_call(&b.right) {
+        if let Expr::StringLiteral(s) = &*b.left
+            && b.op == Operator::Mod && is_locals_call(&b.right) {
                 for caps in PERCENT_FORMAT.captures_iter(s.value.to_str()) {
                     self.out.uses.push(caps[1].to_string());
                 }
             }
-        }
     }
 
     fn handle_call(&mut self, c: &ruff_python_ast::ExprCall) {
         let nargs = c.arguments.args.len();
         // Calls that name things a framework provides by name, such as
         // `@pytest.mark.usefixtures("db")` (from plugins).
-        if !self.opts.call_hints.is_empty() {
-            if let Some(callee) = dotted_name(&c.func) {
-                if self.opts.call_hints.matches_case(&self.resolve_name(&callee)) {
+        if !self.opts.call_hints.is_empty()
+            && let Some(callee) = dotted_name(&c.func)
+                && self.opts.call_hints.matches_case(&self.resolve_name(&callee)) {
                     for arg in &c.arguments.args {
                         if let Expr::StringLiteral(s) = arg {
                             self.out.requested.push(s.value.to_str().to_string());
                         }
                     }
                 }
-            }
-        }
         if let Expr::Name(n) = &*c.func {
             let id = n.id.as_str();
-            if (id == "getattr" && (2..=3).contains(&nargs)) || (id == "hasattr" && nargs == 2) {
-                if let Expr::StringLiteral(s) = &c.arguments.args[1] {
+            if ((id == "getattr" && (2..=3).contains(&nargs)) || (id == "hasattr" && nargs == 2))
+                && let Expr::StringLiteral(s) = &c.arguments.args[1] {
                     self.use_name(s.value.to_str());
                 }
-            }
         }
         // `"{my_var}".format(**locals())`.
-        if let Expr::Attribute(a) = &*c.func {
-            if let Expr::StringLiteral(s) = &*a.value {
+        if let Expr::Attribute(a) = &*c.func
+            && let Expr::StringLiteral(s) = &*a.value {
                 let has_locals = c.arguments.keywords.iter().any(|k| k.arg.is_none() && is_locals_call(&k.value));
                 if a.attr.as_str() == "format" && has_locals {
                     self.handle_new_format_string(s.value.to_str());
                 }
             }
-        }
     }
 
     /// Tag a name assigned directly in a class body, for the declarative
     /// class rules applied once all files are scanned.
+    /// `ClassVar`, `ClassVar[int]`, `typing.ClassVar[int]` or `"ClassVar[int]"`.
+    fn is_class_var(&self, annotation: &Expr) -> bool {
+        let written = match annotation {
+            Expr::StringLiteral(s) => s.value.to_str().split('[').next().unwrap_or_default().trim().to_string(),
+            _ => match dotted_name(annotation) {
+                Some(name) => name,
+                None => return false,
+            },
+        };
+        let name = self.resolve_name(&written);
+        matches!(name.as_str(), "ClassVar" | "typing.ClassVar" | "typing_extensions.ClassVar")
+    }
+
     fn tag_class_attribute(&mut self, target: &Expr, tag: u8) {
         if let (Expr::Name(_), Some(class)) = (target, &self.class_body) {
-            self.pending_tag = Some((tag, class.name.clone()));
+            self.pending_tag = Some((tag, class.index));
         }
     }
 
@@ -1133,14 +1160,20 @@ fn is_super_call(e: &Expr) -> bool {
 fn is_stub_body(body: &[Stmt]) -> bool {
     body.iter().all(|s| match s {
         Stmt::Expr(e) => matches!(&*e.value, Expr::StringLiteral(_) | Expr::EllipsisLiteral(_)),
-        Stmt::Raise(r) => r.exc.as_deref().is_some_and(|e| {
-            let e = match e {
-                Expr::Call(c) => &*c.func,
-                other => other,
-            };
-            matches!(e, Expr::Name(n) if n.id.as_str() == "NotImplementedError")
-        }),
+        Stmt::Raise(_) => is_not_implemented(StmtRef::Stmt(s)),
         _ => false,
+    })
+}
+
+/// `raise NotImplementedError` or `raise NotImplementedError(...)`.
+fn is_not_implemented(s: StmtRef) -> bool {
+    let StmtRef::Stmt(Stmt::Raise(r)) = s else { return false };
+    r.exc.as_deref().is_some_and(|e| {
+        let e = match e {
+            Expr::Call(c) => &*c.func,
+            other => other,
+        };
+        matches!(e, Expr::Name(n) if n.id.as_str() == "NotImplementedError")
     })
 }
 

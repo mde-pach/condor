@@ -27,11 +27,16 @@ impl Engines {
             Err(exit) => return run::emit(exit, out),
         };
         let files: Vec<_> = cli.paths.take().unwrap_or_default().iter().map(|f| resolve(Path::new(f), cwd)).collect();
+        if let Some(missing) = files.iter().find(|f| !f.exists()) {
+            out.line(Stream::Stderr, &format!("Error: {} could not be found.", missing.display()));
+            return INVALID_INPUT;
+        }
         cli.default_paths = vec![".".into()];
         let config = match config::make_config(cli, cwd, None) {
             Outcome::Config(config, banner) => {
+                out.logs_to_stderr = config.format != "text";
                 if let Some(b) = banner {
-                    out.line(Stream::Stdout, &b);
+                    out.log(Stream::Stdout, &b);
                 }
                 config
             }
@@ -51,7 +56,7 @@ impl Engines {
                 return INVALID_CMDLINE;
             }
         };
-        if let Err(msg) = engine.refresh() {
+        if let Err(msg) = engine.refresh(true) {
             out.line(Stream::Stderr, &msg);
             return INVALID_INPUT;
         }
