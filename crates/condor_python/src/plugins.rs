@@ -15,7 +15,7 @@ use condor_core::{Analysis, ClassFacts, Decorator, FunctionFacts};
 use rustc_hash::{FxHashMap, FxHashSet};
 use serde::Deserialize;
 
-use crate::rules::{TAG_CLASS_ATTR, TAG_CLASS_ATTR_CALL, TAG_FIELD};
+use crate::rules::{TAG_CLASS_ATTR, TAG_CLASS_ATTR_CALL, TAG_FIELD, TAG_MODULE_VARIABLE};
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -36,12 +36,21 @@ pub struct Plugin {
     pub variables_used: Vec<VariablesRule>,
 }
 
-/// Module and class variables a framework reads by name (`pytestmark`).
+/// Variables a framework reads by name: module and class variables
+/// (`pytestmark`) in files that import the library, or, with `modules`, the
+/// module-level variables of those modules (Django settings).
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct VariablesRule {
     #[serde(deserialize_with = "selectors")]
     pub names: Vec<String>,
+    /// Dotted module names (`settings`, `settings.*`), matched against the
+    /// file's module name relative to any of its parent directories in the
+    /// project (the import root is not known). Given,
+    /// the rule selects module-level variables of these modules, whether or
+    /// not they import the library.
+    #[serde(default, deserialize_with = "selectors")]
+    pub modules: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -230,7 +239,7 @@ fn validate(p: &Plugin) -> Result<(), String> {
         .flat_map(|r| [&r.decorated_by, &r.names, &r.in_classes_inheriting, &r.in_classes_based_on, &r.inherits])
         .chain(p.fields_used.iter().flat_map(|r| [&r.decorated_by, &r.names, &r.inherits, &r.attributes]))
         .chain(p.parameters_used.iter().flat_map(|r| [&r.decorated_by, &r.names, &r.in_classes_inheriting, &r.in_classes_based_on]))
-        .chain(p.variables_used.iter().map(|r| &r.names))
+        .chain(p.variables_used.iter().flat_map(|r| [&r.names, &r.modules]))
         .chain(p.injected_by_name.iter().flat_map(|r| {
             [&r.providers.decorated_by, &r.providers.names, &r.consumers.names, &r.consumers.files, &r.requested_by_calls]
         }))
@@ -631,6 +640,41 @@ fn file_matches(patterns: &[String], path: &Path) -> bool {
     })
 }
 
+/// The deepest directory holding every scanned file, if they share one.
+fn common_root(analysis: &Analysis) -> Option<std::path::PathBuf> {
+    let mut files = analysis.scans.iter().filter_map(|s| s.file.as_deref());
+    let mut root = files.next()?.parent()?.to_path_buf();
+    for file in files {
+        while !file.starts_with(&root) {
+            root = root.parent()?.to_path_buf();
+        }
+    }
+    Some(root)
+}
+
+/// Whether `file` is one of `modules`. The import root is not known, so
+/// each of its module names relative to a directory between `root` and the
+/// file counts (`settings`, `config.settings`); directories above `root`
+/// are outside the project.
+fn module_matches(modules: &PatternSet, file: Option<&Path>, root: Option<&Path>) -> bool {
+    let Some(file) = file else { return false };
+    let rel = root.and_then(|r| file.strip_prefix(r).ok()).unwrap_or(file);
+    let mut parts: Vec<String> = rel
+        .parent()
+        .into_iter()
+        .flat_map(Path::components)
+        .filter_map(|c| match c {
+            std::path::Component::Normal(p) => Some(p.to_string_lossy().into_owned()),
+            _ => None,
+        })
+        .collect();
+    match rel.file_stem().map(|s| s.to_string_lossy()) {
+        Some(stem) if stem != "__init__" => parts.push(stem.into_owned()),
+        _ => {}
+    }
+    (0..parts.len()).any(|start| modules.matches_case(&parts[start..].join(".")))
+}
+
 /// Apply the active plugins once every file is scanned: remove the items
 /// they declare used.
 pub fn apply(analysis: &mut Analysis, plugins: &[Plugin]) {
@@ -679,6 +723,9 @@ fn removals(analysis: &Analysis, plugins: &[Plugin]) -> FxHashMap<(usize, usize)
         return remove;
     }
     let hierarchy = Hierarchy::new(analysis);
+    // The project's directory, for `variables_used` rules naming modules.
+    let named_modules = active.iter().any(|(_, p)| p.variables_used.iter().any(|r| !r.modules.is_empty()));
+    let root = if named_modules { common_root(analysis) } else { None };
 
     for &(pi, plugin) in &active {
         let gate = Gate::new(analysis, plugin);
@@ -773,9 +820,24 @@ fn removals(analysis: &Analysis, plugins: &[Plugin]) -> FxHashMap<(usize, usize)
 
         for (ri, rule) in plugin.variables_used.iter().enumerate() {
             let names = Selector::new(&rule.names);
-            for (si, scan) in analysis.scans.iter().enumerate().filter(|(si, _)| gate.file(*si)) {
+            let modules = PatternSet::new(&rule.modules);
+            for (si, scan) in analysis.scans.iter().enumerate() {
+                // With `modules`, the module is named, so the rule applies
+                // there even if it does not import the library (a settings
+                // module); it selects only module-level variables.
+                let applies = if modules.is_empty() {
+                    gate.file(si)
+                } else {
+                    module_matches(&modules, scan.file.as_deref(), root.as_deref())
+                };
+                if !applies {
+                    continue;
+                }
                 for (ii, item) in scan.items.iter().enumerate() {
-                    if item.kind == condor_core::ItemKind::Variable && names.matches(&item.name) {
+                    let selected = item.kind == condor_core::ItemKind::Variable
+                        && (modules.is_empty() || item.tag == TAG_MODULE_VARIABLE)
+                        && names.matches(&item.name);
+                    if selected {
                         mark((si, ii), "variables_used", ri);
                     }
                 }

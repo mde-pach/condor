@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+- Django settings: upper-case module-level variables of `settings` modules
+  (`app/settings.py`, `config/settings/base.py`) are used, since Django reads
+  every setting by name; lower-case helpers there are still reported. This
+  applies when the project imports django, even though settings modules
+  usually do not.
+- Plugins: `variables_used` takes a `modules` selector (dotted module names
+  with glob wildcards, matched relative to any directory in the project). A
+  rule with `modules` selects the module-level variables of those modules,
+  whether or not they import the library.
+
 ## 0.3.0
 
 Fixes from an audit of 0.2.0.

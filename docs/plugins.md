@@ -38,11 +38,16 @@ fields = "annotated"        # or "assigned" (x = 1), "calls" (x = f()), "all"
 | `fields_used` | attributes of classes matching any of `decorated_by`, `inherits`, `names`, and of their subclasses (`fields`: `annotated` by default, `assigned`, `calls` for attributes assigned a call such as `models.CharField()`, `all`; `attributes` limits the rule to these names) |
 | `parameters_used` | parameters of functions matching all of `decorated_by`, `names`, `in_classes_inheriting`, `in_classes_based_on` |
 | `injected_by_name` | values passed by parameter name, like pytest fixtures |
-| `variables_used` | module and class variables read by name, like `pytestmark` |
+| `variables_used` | module and class variables read by name, like `pytestmark`; with `modules`, the module-level variables of those modules, like Django settings (`modules = ["settings", "settings.*"]`, `names = ["[A-Z]*"]`) |
 
-Names are written as imported (`pydantic.BaseModel`) and accept `*`
-wildcards. Classes are followed through each file's imports, so a class with
+Names are written as imported (`pydantic.BaseModel`) and accept glob
+wildcards (`*`, `?`, `[A-Z]`). Classes are followed through each file's imports, so a class with
 the same name elsewhere does not match; `in_classes_based_on` looks only at a
-class's own bases (a `Protocol`, not its implementations). Decorator patterns
-and class names apply in files that import a `when_imported` module. The full format is in
+class's own bases (a `Protocol`, not its implementations). Decorator patterns,
+class names and `variables_used` names apply in files that import a
+`when_imported` module; a `variables_used` rule with `modules` applies in
+those modules instead, whether or not they import it (a settings module
+rarely imports Django), once the project imports it somewhere. A module
+matches if its dotted name relative to any directory in the project does:
+`settings.*` matches `config/settings/base.py`. The full format is in
 [schema.json](https://github.com/mde-pach/condor-plugins/blob/main/schema.json).

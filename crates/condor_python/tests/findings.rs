@@ -331,6 +331,42 @@ fn framework_variables_and_validator_parameters() {
 }
 
 #[test]
+fn django_settings_are_used() {
+    let models = "from django.db import models\nclass Order(models.Model):\n    total = models.IntegerField()\nprint(Order)\n";
+    let settings = "import os\nTIMEOUT = 30\nDEBUG: bool = False\nhelper = 1\nNAMES = [1 for N in os.environ]\n\
+                    def f():\n    LOCAL = 1\nclass C:\n    OPTION = 1\nprint(f, C)\n";
+    let base = "SECRET_KEY = 'x'\n";
+    let other = "MAX_ITEMS = 10\n";
+    let files = [
+        ("app/models.py", models),
+        ("app/settings.py", settings),
+        ("config/settings/base.py", base),
+        ("app/constants.py", other),
+        ("app/mysettings.py", other),
+    ];
+    // Settings are the upper-case module-level names of `settings` modules;
+    // locals, class attributes and comprehension variables there are not.
+    let mut found = names(&files);
+    found.sort();
+    assert_eq!(found, ["LOCAL", "MAX_ITEMS", "MAX_ITEMS", "N", "OPTION", "helper"]);
+}
+
+#[test]
+fn settings_modules_need_the_project_to_use_django() {
+    let settings = "TIMEOUT = 30\n";
+    assert_eq!(names(&[("app/settings.py", settings), ("app/main.py", "import os\nprint(os)\n")]), ["TIMEOUT"]);
+}
+
+#[test]
+fn settings_modules_are_named_within_the_project() {
+    // The project lives in a directory named `settings`: its modules are not
+    // `settings.*`.
+    let models = "from django.db import models\nclass Order(models.Model):\n    pass\nprint(Order)\n";
+    let files = [("settings/app/models.py", models), ("settings/app/constants.py", "MAX_ITEMS = 10\n")];
+    assert_eq!(names(&files), ["MAX_ITEMS"]);
+}
+
+#[test]
 fn plugin_validation() {
     use condor_python::plugins::parse;
     let ok = |p: &str, s: &str| parse(p, s).map(|_| ()).map_err(|e| e.to_string());
@@ -339,6 +375,9 @@ fn plugin_validation() {
     assert!(ok("p.toml", "[plugin]\nname = \"p\"\nwhen_imported = [\"a.b\"]\n").unwrap_err().contains("top-level"));
     assert!(ok("p.toml", "[plugin]\nname = \"\"\n").unwrap_err().contains("name"));
     assert!(ok("p.toml", "[plugin]\nname = \"p\"\n[[used]]\nnames = [\"[f\"]\n").unwrap_err().contains("unclosed"));
+    assert!(ok("p.toml", "[plugin]\nname = \"p\"\n[[variables_used]]\nnames = [\"[A-Z]*\"]\nmodules = [\"conf.*\"]\n").is_ok());
+    assert!(ok("p.toml", "[plugin]\nname = \"p\"\n[[variables_used]]\nnames = [\"X\"]\nmodules = []\n").unwrap_err().contains("empty list"));
+    assert!(ok("p.toml", "[plugin]\nname = \"p\"\n[[variables_used]]\nmodules = [\"conf\"]\n").unwrap_err().contains("names"));
     assert!(ok("p.json", "[]").unwrap_err().contains("JSON object"));
     assert!(ok("p.yaml", "").unwrap_err().contains(".toml or .json"));
     let null = r#"{"plugin": {"name": "p"}, "injected_by_name": [{"providers": {"names": ["f"]}, "name_keyword": null}]}"#;
