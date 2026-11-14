@@ -262,3 +262,15 @@ decorated_by = ["django.dispatch.receiver"]
 
 [[parameters_used]]
 decorated_by = ["django.dispatch.receiver"]
+
+# Settings: Django reads every upper-case module-level name of the settings
+# module (DJANGO_SETTINGS_MODULE) through django.conf.settings, so a setting
+# is used even if no code names it. Settings modules are usually named
+# `settings` (`proj/settings.py`) or are modules of a `settings` package
+# (`config/settings/base.py`), and do not import django themselves.
+# `[A-Z]*` selects names starting with an upper-case letter (Django reads
+# names that are all upper case; a glob cannot say that). Lower-case helpers
+# there are not settings and are still reported.
+[[variables_used]]
+modules = ["settings", "settings.*"]
+names = ["[A-Z]*"]

@@ -227,7 +227,7 @@
     },
     "variables_used": {
       "type": "array",
-      "description": "Module and class variables a framework reads by name (pytestmark). They apply in files that import a when_imported module.",
+      "description": "Variables a framework reads by name. Without modules: module and class variables (pytestmark) in files that import a when_imported module. With modules: module-level variables of those modules, whether or not they import the library (Django settings).",
       "items": {
         "type": "object",
         "additionalProperties": false,
@@ -236,7 +236,12 @@
         ],
         "properties": {
           "names": {
-            "$ref": "#/$defs/names"
+            "$ref": "#/$defs/names",
+            "description": "Variable names, with glob wildcards ([A-Z]* for upper-case names)."
+          },
+          "modules": {
+            "$ref": "#/$defs/names",
+            "description": "Dotted module names with glob wildcards (settings, settings.*). A file matches if its module name relative to any directory of the project matches: settings.* matches config/settings/base.py. Selects only module-level variables, in these modules, whether or not they import the library; the plugin still applies only when the project imports a when_imported module."
           }
         }
       }

@@ -11,6 +11,9 @@ pub const TAG_FIELD: u8 = 1;
 pub const TAG_CLASS_ATTR: u8 = 2;
 /// An attribute assigned a call in a class body (`name = models.CharField()`).
 pub const TAG_CLASS_ATTR_CALL: u8 = 3;
+/// A variable bound at module level (`TIMEOUT = 30`), outside functions,
+/// classes and comprehensions.
+pub const TAG_MODULE_VARIABLE: u8 = 4;
 
 /// Whether `body` (or `params`) binds `name` in the scope itself (not in
 /// nested functions or classes).

@@ -25,7 +25,7 @@ use rustc_hash::FxHashSet;
 use crate::format_string;
 use crate::literal;
 use crate::noqa::NoqaLines;
-use crate::rules::{self, TAG_CLASS_ATTR, TAG_CLASS_ATTR_CALL, TAG_FIELD};
+use crate::rules::{self, TAG_CLASS_ATTR, TAG_CLASS_ATTR_CALL, TAG_FIELD, TAG_MODULE_VARIABLE};
 use crate::type_comments;
 
 const DEFAULT_CONFIDENCE: u8 = 60;
@@ -103,6 +103,7 @@ pub fn scan(source: &str, path: Arc<Path>, opts: &ScanOptions) -> FileScan {
         scopes: Vec::new(),
         class_body: None,
         pending_tag: None,
+        comprehension_target: false,
         skip_params: None,
         aliases,
         param_owner: None,
@@ -143,6 +144,8 @@ struct Scanner<'a> {
     class_body: Option<ClassBody>,
     /// Tag for the next definition (class fields), and its class's index.
     pending_tag: Option<(u8, usize)>,
+    /// While visiting a comprehension's targets, which are local to it.
+    comprehension_target: bool,
     /// While visiting a function's parameters: why they are not definitions.
     skip_params: Option<SkipParams>,
     /// Local name -> dotted name it was imported as.
@@ -798,7 +801,9 @@ impl<'a> Scanner<'a> {
 
     fn visit_comprehensions(&mut self, generators: &'a [Comprehension]) {
         for g in generators {
+            let outer = std::mem::replace(&mut self.comprehension_target, true);
             self.visit_expr(&g.target);
+            self.comprehension_target = outer;
             self.visit_expr(&g.iter);
             for cond in &g.ifs {
                 self.visit_expr(cond);
@@ -979,7 +984,12 @@ impl<'a> Scanner<'a> {
                     }
                 }
                 ExprContext::Store => {
-                    self.define_variable(n.id.as_str(), e, DEFAULT_CONFIDENCE);
+                    let module_level = self.scopes.is_empty() && self.class_body.is_none() && !self.comprehension_target;
+                    if let Some(i) = self.define_variable(n.id.as_str(), e, DEFAULT_CONFIDENCE)
+                        && module_level
+                    {
+                        self.out.items[i].tag = TAG_MODULE_VARIABLE;
+                    }
                 }
                 ExprContext::Invalid => {}
             },
